@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>腦波療癒數位禮物</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
+        #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.7); transition: opacity 1s ease; }
+    </style>
+</head>
+<body>
+
+    <canvas id="webgl-canvas"></canvas>
+
+    <div id="ui-container">
+        <div class="bg-white/10 backdrop-blur-md p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/20 shadow-2xl">
+            <h1 class="text-3xl font-bold mb-4">你好，今天過得如何？</h1>
+            <p class="text-gray-300 mb-8">選擇你當下的心情，我們將為你調配一段專屬的腦波療癒禮物...</p>
+            
+            <div class="space-y-4">
+                <button onclick="generateGift('anxious')" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
+                    🧘‍♂️ 感到焦慮 (調配：Delta 深層舒緩波)
+                </button>
+                <button onclick="generateGift('celebrate')" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
+                    🎉 值得慶祝 (調配：Beta 活力雀躍波)
+                </button>
+            </div>
+            
+            <div id="loading-status" class="hidden mt-6 text-cyan-300 animate-pulse">
+                正在為您打包專屬能量影片，請稍候...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, material;
+        let animationFrameId;
+        
+        // 你的 Shader Uniforms（用來與網頁拉桿/按鈕連動的變數）
+        let shaderUniforms = {
+            iTime: { value: 0 },
+            iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+            uDeltaFreq: { value: 2.0 }, // 預設 Delta 頻率
+            uBetaFreq: { value: 40.0 }  // 預設 Beta 頻率
+        };
+
+        // 💡 這裡放的就是我們一塊寫出來的完美 GLSL Shader 程式碼！
+        const fragmentShaderSource = `
+            uniform float iTime;
+            uniform vec2 iResolution;
+            uniform float uDeltaFreq;
+            uniform float uBetaFreq;
+
+            vec3 palette( float t ){ 
+                vec3 a = vec3(1.248, 0.5, 0.5);
+                vec3 b = vec3(-0.042, 0.5, 0.5);
+                vec3 c = vec3(1.0, 1.0, 1.0);
+                vec3 d = vec3(0.0, 0.333, 0.667);
+                return a + b*cos( 6.283185*(c*t+d) );
+            }
+
+            void mainImage( out vec4 fragColor, in vec2 fragCoord )
+            {
+                vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
+                vec2 uv_bg = fragCoord / iResolution.xy;
+
+                float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
+                vec3 backgroundColor = palette(bg_t);
+
+                vec2 symmetric_uv = abs(uv_center);
+                vec2 cornerTarget = vec2(1.7, 1.0);
+                vec2 r_uv = symmetric_uv - cornerTarget;
+                
+                float r = length(r_uv);
+                float angle = atan(r_uv.y, r_uv.x);
+                float base_d = r * (1.0 + 0.2 * cos(angle * 4.0));
+
+                // 💡 這裡使用了傳進來的網頁互動參數 uDeltaFreq 與 uBetaFreq！
+                float delta = sin(base_d * uDeltaFreq - iTime * 1.5) * 0.3; 
+                float beta  = sin(base_d * uBetaFreq + iTime * 12.0) * 0.05; 
+                
+                float wave = abs(delta + beta);
+                float final_glow = 0.005 / (wave + 0.001);
+                final_glow *= exp(-base_d * 0.2);
+
+                float rippleMixControl = clamp(final_glow, 0.0, 1.0);
+                vec3 rippleColor = palette(iTime * 0.1 + 0.5); 
+
+                vec3 finalColor = mix(backgroundColor, rippleColor, rippleMixControl);
+                fragColor = vec4(finalColor, 1.0);
+            }
+
+            void main() {
+                mainImage(gl_FragColor, gl_FragCoord.xy);
+            }
+        `;
+
+        // 初始化 Three.js 渲染環境
+        function initShader() {
+            const canvas = document.getElementById('webgl-canvas');
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+
+            scene = new THREE.Scene();
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+            material = new THREE.ShaderMaterial({
+                uniforms: shaderUniforms,
+                fragmentShader: fragmentShaderSource
+            });
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            window.addEventListener('resize', onWindowResize);
+            animate(0);
+        }
+
+        function animate(timestamp) {
+            animationFrameId = requestAnimationFrame(animate);
+            shaderUniforms.iTime.value = timestamp * 0.001; // 轉換為秒
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
+        }
+
+        // 處理使用者點擊按鈕的互動
+        function generateGift(mood) {
+            // 根據使用者的選擇，代入不同的 Shader 參數
+            if (mood === 'anxious') {
+                shaderUniforms.uDeltaFreq.value = 1.5;  // 慢速寬廣的療癒波
+                shaderUniforms.uBetaFreq.value = 10.0;  // 降低緊繃的高頻波
+            } else if (mood === 'celebrate') {
+                shaderUniforms.uDeltaFreq.value = 6.0;  // 密集的能量波
+                shaderUniforms.uBetaFreq.value = 60.0;  // 極度雀躍的細密波
+            }
+
+            // 讓 UI 介面淡出隱藏
+            document.getElementById('loading-status').classList.remove('hidden');
+            setTimeout(() => {
+                document.getElementById('ui-container').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('ui-container').style.display = 'none';
+                }, 1000);
+            }, 500);
+
+            // 觸發影片錄製與下載
+            startRecordingAndDownload();
+        }
+
+        // 核心功能：錄製畫布並下載為影片
+        function startRecordingAndDownload() {
+            const canvas = document.getElementById('webgl-canvas');
+            const stream = canvas.captureStream(30); // 30 FPS 錄製
+            
+            // 建立錄影器 (支援大多數現代瀏覽器，格式為 webm，可用多數播放器播放)
+            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+            const chunks = [];
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                // 將錄製的片段打包成檔案
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                
+                // 自動觸發瀏覽器下載
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'Your_Brainwave_Gift.webm';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+
+            // 開始錄製
+            mediaRecorder.start();
+
+            // 錄製 5 秒鐘後自動停止並下載
+            setTimeout(() => {
+                mediaRecorder.stop();
+            }, 5000);
+        }
+
+        // 網頁載入完成後啟動
+        window.onload = initShader;
+    </script>
+</body>
+</html>
