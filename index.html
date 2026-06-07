@@ -18,20 +18,20 @@
 
     <div id="ui-container">
         <div class="bg-white/10 backdrop-blur-md p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/20 shadow-2xl">
-            <h1 class="text-3xl font-bold mb-4">Hello, how's your day？</h1>
-            <p class="text-gray-300 mb-8">選擇你當下的心情，我們將為你調配一段專屬的腦波療癒禮物...</p>
+            <h1 class="text-3xl font-bold mb-4">Hello, how's your day?</h1>
+            <p class="text-gray-300 mb-8">Select your current mood, and we will formulate a personalized brainwave healing gift for you...</p>
             
             <div class="space-y-4">
                 <button onclick="generateGift('anxious')" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
-                    🧘‍♂️ 感到焦慮 (調配：Delta 深層舒緩波)
+                    🧘‍♂️ Feeling Anxious (Tune: Deep Delta Waves)
                 </button>
                 <button onclick="generateGift('celebrate')" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
-                    🎉 值得慶祝 (調配：Beta 活力雀躍波)
+                    🎉 Time to Celebrate (Tune: Energetic Beta Waves)
                 </button>
             </div>
             
             <div id="loading-status" class="hidden mt-6 text-cyan-300 animate-pulse">
-                正在為您打包專屬能量影片，請稍候...
+                Packaging your exclusive energy video, please wait...
             </div>
         </div>
     </div>
@@ -40,20 +40,21 @@
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 你的 Shader Uniforms（用來與網頁拉桿/按鈕連動的變數）
+        // 💡 這裡新增了 uStarted 變數，預設是 0.0（代表尚未啟動，顯示全黑）
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uDeltaFreq: { value: 2.0 }, // 預設 Delta 頻率
-            uBetaFreq: { value: 40.0 }  // 預設 Beta 頻率
+            uDeltaFreq: { value: 2.0 }, 
+            uBetaFreq: { value: 40.0 },
+            uStarted: { value: 0.0 } 
         };
 
-        // 💡 這裡放的就是我們一塊寫出來的完美 GLSL Shader 程式碼！
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
             uniform float uDeltaFreq;
             uniform float uBetaFreq;
+            uniform float uStarted; // 💡 接收來自網頁的開關訊號
 
             vec3 palette( float t ){ 
                 vec3 a = vec3(1.248, 0.5, 0.5);
@@ -65,6 +66,13 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
+                // 💡 核心魔術：如果 uStarted 小於 0.5，直接輸出黑色並結束計算，不再往下跑
+                if (uStarted < 0.5) {
+                    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
+                    return;
+                }
+
+                // 以下是原本絢麗的腦波 Shader 邏輯，只有在 uStarted == 1.0 時才會執行
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
@@ -79,7 +87,6 @@
                 float angle = atan(r_uv.y, r_uv.x);
                 float base_d = r * (1.0 + 0.2 * cos(angle * 4.0));
 
-                // 💡 這裡使用了傳進來的網頁互動參數 uDeltaFreq 與 uBetaFreq！
                 float delta = sin(base_d * uDeltaFreq - iTime * 1.5) * 0.3; 
                 float beta  = sin(base_d * uBetaFreq + iTime * 12.0) * 0.05; 
                 
@@ -99,7 +106,6 @@
             }
         `;
 
-        // 初始化 Three.js 渲染環境
         function initShader() {
             const canvas = document.getElementById('webgl-canvas');
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -123,7 +129,7 @@
 
         function animate(timestamp) {
             animationFrameId = requestAnimationFrame(animate);
-            shaderUniforms.iTime.value = timestamp * 0.001; // 轉換為秒
+            shaderUniforms.iTime.value = timestamp * 0.001;
             renderer.render(scene, camera);
         }
 
@@ -132,18 +138,18 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
-        // 處理使用者點擊按鈕的互動
         function generateGift(mood) {
-            // 根據使用者的選擇，代入不同的 Shader 參數
+            // 💡 關鍵動作：使用者一點擊，立刻把開關打開（設為 1.0），背景瞬間亮起！
+            shaderUniforms.uStarted.value = 1.0;
+
             if (mood === 'anxious') {
-                shaderUniforms.uDeltaFreq.value = 1.5;  // 慢速寬廣的療癒波
-                shaderUniforms.uBetaFreq.value = 10.0;  // 降低緊繃的高頻波
+                shaderUniforms.uDeltaFreq.value = 1.5;  
+                shaderUniforms.uBetaFreq.value = 10.0;  
             } else if (mood === 'celebrate') {
-                shaderUniforms.uDeltaFreq.value = 6.0;  // 密集的能量波
-                shaderUniforms.uBetaFreq.value = 60.0;  // 極度雀躍的細密波
+                shaderUniforms.uDeltaFreq.value = 6.0;  
+                shaderUniforms.uBetaFreq.value = 60.0;  
             }
 
-            // 讓 UI 介面淡出隱藏
             document.getElementById('loading-status').classList.remove('hidden');
             setTimeout(() => {
                 document.getElementById('ui-container').style.opacity = '0';
@@ -152,16 +158,12 @@
                 }, 1000);
             }, 500);
 
-            // 觸發影片錄製與下載
             startRecordingAndDownload();
         }
 
-        // 核心功能：錄製畫布並下載為影片
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
-            const stream = canvas.captureStream(30); // 30 FPS 錄製
-            
-            // 建立錄影器 (支援大多數現代瀏覽器，格式為 webm，可用多數播放器播放)
+            const stream = canvas.captureStream(30); 
             const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
             const chunks = [];
 
@@ -170,11 +172,8 @@
             };
 
             mediaRecorder.onstop = () => {
-                // 將錄製的片段打包成檔案
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
-                
-                // 自動觸發瀏覽器下載
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = 'Your_Brainwave_Gift.webm';
@@ -183,16 +182,12 @@
                 document.body.removeChild(a);
             };
 
-            // 開始錄製
             mediaRecorder.start();
-
-            // 錄製 5 秒鐘後自動停止並下載
             setTimeout(() => {
                 mediaRecorder.stop();
             }, 5000);
         }
 
-        // 網頁載入完成後啟動
         window.onload = initShader;
     </script>
 </body>
