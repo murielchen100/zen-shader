@@ -37,7 +37,7 @@
     </div>
 
     <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-500 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2">
-        ⏳ Recording... (0s/30s)
+        ⏳ Recording... (10s/30s)
     </a>
 
     <script>
@@ -53,7 +53,7 @@
             uStarted: { value: 0.0 } // 預設 0.0 代表初始畫面為全黑
         };
 
-        // 顯示卡的魔法公式：GLSL (C語言風格)
+        // 顯示卡的魔法公式：GLSL
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
@@ -71,13 +71,11 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
-                // 檢查開關：如果還沒點擊按鈕 (uStarted < 0.5)，直接塗黑並中斷執行
                 if (uStarted < 0.5) {
                     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
                     return;
                 }
 
-                // 當 uStarted 被改為 1.0 時，才會執行底下的絢麗動畫計算
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
@@ -145,7 +143,7 @@
 
         // 處理使用者點擊按鈕的互動
         function generateGift(mood) {
-            // 1. 點擊瞬間接通電線，讓 Shader 畫面從全黑甦醒
+            // 1. 喚醒 Shader 畫面
             shaderUniforms.uStarted.value = 1.0;
 
             if (mood === 'anxious') {
@@ -166,9 +164,9 @@
             // ⏱️ 定時器一：【5秒後】讓整個中央文字框漂亮地淡出並完全消失
             setTimeout(() => {
                 const uiBox = document.getElementById('ui-container');
-                uiBox.style.opacity = '0'; // 觸發 CSS 漸變淡出
+                uiBox.style.opacity = '0'; 
                 setTimeout(() => {
-                    uiBox.style.display = 'none'; // 淡出完成後徹底從螢幕移除
+                    uiBox.style.display = 'none'; 
                 }, 1000);
             }, 5000); 
 
@@ -176,8 +174,6 @@
             setTimeout(() => {
                 const downloadBtn = document.getElementById('download-btn');
                 downloadBtn.style.display = 'flex'; 
-                downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-gray-500 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2";
-                downloadBtn.innerHTML = "⏳ Recording... (10s/30s)";
             }, 10000); 
         }
 
@@ -186,7 +182,7 @@
             const canvas = document.getElementById('webgl-canvas');
             const stream = canvas.captureStream(30); // 30 FPS 錄製
             
-            // 安全修正：相容所有瀏覽器（包含 iPhone/Safari），如果 VP9 不支援則降級使用預設 WebM
+            // 安全修正：相容各家瀏覽器
             let options = { mimeType: 'video/webm;codecs=vp9' };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                 options = { mimeType: 'video/webm' };
@@ -199,42 +195,37 @@
                 if (e.data.size > 0) chunks.push(e.data);
             };
 
+            // 💡 修正後的大括號：確保 onstop 只負責錄影完畢後的「換顏色」和「檔案綁定」
             mediaRecorder.onstop = () => {
-                // 30秒時間到，錄影機真正停止，將錄製片段打包成檔案網址
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
 
-                // 找到右下角的下載按鈕
                 const downloadBtn = document.getElementById('download-btn');
                 
-                // 💡 調整一：解鎖按鈕，讓它變綠色、可以被滑鼠點擊
+                // 30秒到了：按鈕染成綠色、解鎖滑鼠點擊
                 downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto";
                 downloadBtn.innerHTML = "📥 Download Ready (30s)";
                 
-                // 💡 調整二：【核心大改動】當使用者真正動手點擊這個綠色按鈕時，觸發以下動作：
+                // 使用者手動點擊綠色按鈕時，動清出一個隱形傳送門直接下載
                 downloadBtn.onclick = (e) => {
-                    e.preventDefault(); // 防止網頁跳轉
-                    
-                    // 在後台臨時生出一個完全乾淨、沒被鎖定過的隱形 <a> 標籤
+                    e.preventDefault();
                     const tempAnchor = document.createElement('a');
                     tempAnchor.style.display = 'none';
                     tempAnchor.href = url;
                     tempAnchor.download = 'Your_30s_Brainwave_Gift.webm';
-                    
-                    // 把這個隱形標籤塞進網頁、強迫它點擊下載、然後立刻銷毀它
                     document.body.appendChild(tempAnchor);
                     tempAnchor.click();
                     document.body.removeChild(tempAnchor);
                 };
             };
 
-            // 開始錄製
+            // 💡 修正後的位置：這兩行必須獨立在 onstop 肚子外面，錄影才會真正啟動！
             mediaRecorder.start();
 
-            // ⏱️ 定時器三：【30秒後】自動停止錄影，觸發上方的 onstop 變色與解鎖邏輯
+            // ⏱️ 定時器三：【30秒後】自動停止錄影，觸發內部的變色打包邏輯
             setTimeout(() => {
                 mediaRecorder.stop();
-            }, 30000); // 30000 毫秒 = 30 秒
+            }, 30000); 
         }
 
         window.onload = initShader;
