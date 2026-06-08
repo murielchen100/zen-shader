@@ -29,16 +29,16 @@
                     🎉 Time to Celebrate (Tune: Energetic Beta Waves)
                 </button>
             </div>
-
-            <a id="download-btn" style="display: none;" class="w-full bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer text-center block mt-4">
-                📥 Download Your Brainwave Video
-            </a>
             
             <div id="loading-status" class="hidden mt-6 text-cyan-300 animate-pulse">
                 Packaging your exclusive energy video, please wait...
             </div>
         </div>
     </div>
+
+    <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2">
+        📥 Download 30s Video
+    </a>
 
     <script>
         let scene, camera, renderer, material;
@@ -145,63 +145,74 @@
 
         // 處理使用者點擊按鈕的互動
         function generateGift(mood) {
-            // 💡 點擊瞬間接通電線，讓 Shader 畫面從全黑甦醒
-            shaderUniforms.uStarted.value = 1.0;
+    // 1. 喚醒 Shader 畫面
+    shaderUniforms.uStarted.value = 1.0;
 
-            if (mood === 'anxious') {
-                shaderUniforms.uDeltaFreq.value = 1.5;  
-                shaderUniforms.uBetaFreq.value = 10.0;  
-            } else if (mood === 'celebrate') {
-                shaderUniforms.uDeltaFreq.value = 6.0;  
-                shaderUniforms.uBetaFreq.value = 60.0;  
-            }
+    // 2. 帶入腦波頻率
+    if (mood === 'anxious') {
+        shaderUniforms.uDeltaFreq.value = 1.5;  
+        shaderUniforms.uBetaFreq.value = 10.0;  
+    } else if (mood === 'celebrate') {
+        shaderUniforms.uDeltaFreq.value = 6.0;  
+        shaderUniforms.uBetaFreq.value = 60.0;  
+    }
 
-            // 💡 顯示「錄製中」的狀態字樣
-            document.getElementById('loading-status').classList.remove('hidden');
-            
-            // 💡 隱藏原本的心情選項按鈕，防止使用者重複點擊
-            document.querySelector('.space-y-4').style.display = 'none';
+    // 3. 隱藏原本的按鈕，秀出進度文字
+    document.querySelector('.space-y-4').style.display = 'none';
+    document.getElementById('loading-status').classList.remove('hidden');
 
-            // 觸發影片錄製
-            startRecordingAndDownload();
-        }
+    // 啟動錄影（它會默默錄 30 秒，後面會設定）
+    startRecordingAndDownload();
+
+    // ⏱️ 定時器一：【5秒後】讓整個中央文字框漂亮地淡出並消失
+    setTimeout(() => {
+        const uiBox = document.getElementById('ui-container');
+        uiBox.style.opacity = '0'; // 觸發淡出動畫
+        setTimeout(() => {
+            uiBox.style.display = 'none'; // 5.5秒時完全從畫面上移除
+        }, 500);
+    }, 5000); // 5000毫秒 = 5秒
+
+    // ⏱️ 定時器二：【10秒後】讓右下角的下載按鈕悄悄浮現
+    setTimeout(() => {
+        const downloadBtn = document.getElementById('download-btn');
+        downloadBtn.style.display = 'flex'; // 顯示右下角按鈕
+    }, 10000); // 10000毫秒 = 10秒
+}
 
         // 核心功能：錄製畫布並於 20 秒後生成安全下載連結
         function startRecordingAndDownload() {
-            const canvas = document.getElementById('webgl-canvas');
-            const stream = canvas.captureStream(30); // 30 FPS 錄製
-            const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-            const chunks = [];
+    const canvas = document.getElementById('webgl-canvas');
+    const stream = canvas.captureStream(30); 
+    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+    const chunks = [];
 
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunks.push(e.data);
-            };
+    mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+    };
 
-            mediaRecorder.onstop = () => {
-                // 將錄製的片段打包成檔案網址
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-                
-                // 隱藏「Packaging...」提示文字
-                document.getElementById('loading-status').classList.add('hidden');
+    mediaRecorder.onstop = () => {
+        // 30秒時間到，錄影機停止，打包檔案
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
 
-                // 找到 HTML 裡的下載按鈕，把檔案塞給它
-                const downloadBtn = document.getElementById('download-btn');
-                downloadBtn.href = url;
-                downloadBtn.download = 'Your_Brainwave_Gift.webm';
-                
-                // 💡 解除隱藏，讓綠色的安全下載按鈕秀在畫面上！
-                downloadBtn.style.display = 'block';
-            };
+        // 把影片綁定到右下角的下載按鈕上
+        const downloadBtn = document.getElementById('download-btn');
+        downloadBtn.href = url;
+        downloadBtn.download = 'Your_30s_Brainwave_Gift.webm';
+        
+        // 更改按鈕文字，提示使用者「影片已經打包好，隨時可以下載了！」
+        downloadBtn.innerHTML = "📥 Download Ready (30s)";
+    };
 
-            // 開始錄製
-            mediaRecorder.start();
+    // 開始錄影
+    mediaRecorder.start();
 
-            // 💡 延長錄製時間：設定為 20 秒 (20000 毫秒)
-            setTimeout(() => {
-                mediaRecorder.stop();
-            }, 20000);
-        }
+    // ⏱️ 定時器三：【30秒後】自動停止錄影
+    setTimeout(() => {
+        mediaRecorder.stop();
+    }, 30000); // 30000毫秒 = 30秒
+}
 
         window.onload = initShader;
     </script>
