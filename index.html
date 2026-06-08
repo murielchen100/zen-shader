@@ -36,8 +36,8 @@
         </div>
     </div>
 
-    <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2">
-        📥 Download 30s Video
+    <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-500 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2">
+        ⏳ Recording... (0s/30s)
     </a>
 
     <script>
@@ -50,7 +50,7 @@
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             uDeltaFreq: { value: 2.0 }, 
             uBetaFreq: { value: 40.0 },
-            uStarted: { value: 0.0 } // 💡 預設 0.0 代表初始畫面為全黑
+            uStarted: { value: 0.0 } // 預設 0.0 代表初始畫面為全黑
         };
 
         // 顯示卡的魔法公式：GLSL (C語言風格)
@@ -71,150 +71,11 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
-                // 💡 檢查開關：如果還沒點擊按鈕 (uStarted < 0.5)，直接塗黑並中斷執行
+                // 檢查開關：如果還沒點擊按鈕 (uStarted < 0.5)，直接塗黑並中斷執行
                 if (uStarted < 0.5) {
                     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
                     return;
                 }
 
                 // 當 uStarted 被改為 1.0 時，才會執行底下的絢麗動畫計算
-                vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
-                vec2 uv_bg = fragCoord / iResolution.xy;
-
-                float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
-                vec3 backgroundColor = palette(bg_t);
-
-                vec2 symmetric_uv = abs(uv_center);
-                vec2 cornerTarget = vec2(1.7, 1.0);
-                vec2 r_uv = symmetric_uv - cornerTarget;
-                
-                float r = length(r_uv);
-                float angle = atan(r_uv.y, r_uv.x);
-                float base_d = r * (1.0 + 0.2 * cos(angle * 4.0));
-
-                float delta = sin(base_d * uDeltaFreq - iTime * 1.5) * 0.3; 
-                float beta  = sin(base_d * uBetaFreq + iTime * 12.0) * 0.05; 
-                
-                float wave = abs(delta + beta);
-                float final_glow = 0.005 / (wave + 0.001);
-                final_glow *= exp(-base_d * 0.2);
-
-                float rippleMixControl = clamp(final_glow, 0.0, 1.0);
-                vec3 rippleColor = palette(iTime * 0.1 + 0.5); 
-
-                vec3 finalColor = mix(backgroundColor, rippleColor, rippleMixControl);
-                fragColor = vec4(finalColor, 1.0);
-            }
-
-            void main() {
-                mainImage(gl_FragColor, gl_FragCoord.xy);
-            }
-        `;
-
-        function initShader() {
-            const canvas = document.getElementById('webgl-canvas');
-            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-
-            scene = new THREE.Scene();
-            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-            material = new THREE.ShaderMaterial({
-                uniforms: shaderUniforms,
-                fragmentShader: fragmentShaderSource
-            });
-
-            const geometry = new THREE.PlaneGeometry(2, 2);
-            const mesh = new THREE.Mesh(geometry, material);
-            scene.add(mesh);
-
-            window.addEventListener('resize', onWindowResize);
-            animate(0);
-        }
-
-        function animate(timestamp) {
-            animationFrameId = requestAnimationFrame(animate);
-            shaderUniforms.iTime.value = timestamp * 0.001; 
-            renderer.render(scene, camera);
-        }
-
-        function onWindowResize() {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
-        }
-
-        // 處理使用者點擊按鈕的互動
-        function generateGift(mood) {
-    // 1. 喚醒 Shader 畫面
-    shaderUniforms.uStarted.value = 1.0;
-
-    // 2. 帶入腦波頻率
-    if (mood === 'anxious') {
-        shaderUniforms.uDeltaFreq.value = 1.5;  
-        shaderUniforms.uBetaFreq.value = 10.0;  
-    } else if (mood === 'celebrate') {
-        shaderUniforms.uDeltaFreq.value = 6.0;  
-        shaderUniforms.uBetaFreq.value = 60.0;  
-    }
-
-    // 3. 隱藏原本的按鈕，秀出進度文字
-    document.querySelector('.space-y-4').style.display = 'none';
-    document.getElementById('loading-status').classList.remove('hidden');
-
-    // 啟動錄影（它會默默錄 30 秒，後面會設定）
-    startRecordingAndDownload();
-
-    // ⏱️ 定時器一：【5秒後】讓整個中央文字框漂亮地淡出並消失
-    setTimeout(() => {
-        const uiBox = document.getElementById('ui-container');
-        uiBox.style.opacity = '0'; // 觸發淡出動畫
-        setTimeout(() => {
-            uiBox.style.display = 'none'; // 5.5秒時完全從畫面上移除
-        }, 500);
-    }, 5000); // 5000毫秒 = 5秒
-
-    // ⏱️ 定時器二：【10秒後】讓右下角的下載按鈕悄悄浮現
-    setTimeout(() => {
-        const downloadBtn = document.getElementById('download-btn');
-        downloadBtn.style.display = 'flex'; // 顯示右下角按鈕
-    }, 10000); // 10000毫秒 = 10秒
-}
-
-        // 核心功能：錄製畫布並於 20 秒後生成安全下載連結
-        function startRecordingAndDownload() {
-    const canvas = document.getElementById('webgl-canvas');
-    const stream = canvas.captureStream(30); 
-    const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-    const chunks = [];
-
-    mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-    };
-
-    mediaRecorder.onstop = () => {
-        // 30秒時間到，錄影機停止，打包檔案
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        const url = URL.createObjectURL(blob);
-
-        // 把影片綁定到右下角的下載按鈕上
-        const downloadBtn = document.getElementById('download-btn');
-        downloadBtn.href = url;
-        downloadBtn.download = 'Your_30s_Brainwave_Gift.webm';
-        
-        // 更改按鈕文字，提示使用者「影片已經打包好，隨時可以下載了！」
-        downloadBtn.innerHTML = "📥 Download Ready (30s)";
-    };
-
-    // 開始錄影
-    mediaRecorder.start();
-
-    // ⏱️ 定時器三：【30秒後】自動停止錄影
-    setTimeout(() => {
-        mediaRecorder.stop();
-    }, 30000); // 30000毫秒 = 30秒
-}
-
-        window.onload = initShader;
-    </script>
-</body>
-</html>
+                vec2 uv_center = (fragCoord * 2.0 -
