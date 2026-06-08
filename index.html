@@ -9,7 +9,14 @@
     <style>
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.7); transition: opacity 1s ease; }
+        /* 互動 UI 容器：確保永遠疊在畫布最上層 */
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.85); }
+        /* 雲朵般浮動的微動畫效果 */
+        .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.8s ease, transform 0.8s ease; }
+        @keyframes floatMotion {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50% { transform: translateY(-10px) scale(1.02); }
+        }
     </style>
 </head>
 <body>
@@ -17,55 +24,59 @@
     <canvas id="webgl-canvas"></canvas>
 
     <div id="ui-container">
-        <div class="bg-white/10 backdrop-blur-md p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/20 shadow-2xl">
-            <h1 class="text-3xl font-bold mb-4">Hello, how's your day?</h1>
-            <p class="text-gray-300 mb-8">Select your current mood, and we will formulate a personalized brainwave healing gift for you...</p>
-            
-            <div class="space-y-4">
-                <button onclick="generateGift('anxious')" class="w-full bg-cyan-500 hover:bg-cyan-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
-                    🧘‍♂️ Feeling Anxious (Tune: Deep Delta Waves)
-                </button>
-                <button onclick="generateGift('celebrate')" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
-                    🎉 Time to Celebrate (Tune: Energetic Beta Waves)
-                </button>
-            </div>
-            
-            <div id="loading-status" class="hidden mt-6 text-cyan-300 animate-pulse">
-                Packaging your exclusive energy video, please wait...
-            </div>
+        <div id="dialog-card" class="cloud-box bg-white/10 backdrop-blur-xl p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/10 shadow-2xl mx-4">
+            <div id="content-area"></div>
         </div>
     </div>
 
-    <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-500 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2">
-        ⏳ Recording... (10s/30s)
+    <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-600 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2 transition-all duration-500">
+        ⏳ Generating your 30s gift...
     </a>
 
     <script>
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 傳遞給 Shader 的變數群，包含 uStarted 開關
+        // 核心參數儲存：使用者在測驗中留下的印記
+        let userChoices = {
+            delta: 2.0,
+            beta: 40.0,
+            paletteType: 1.0,  // 1: 預設, 2: 繽紛, 3: 暗黑活力
+            patternType: 0.0   // 0: 幾何漣漪, 1: 花朵形狀, 2: 樹葉脈絡
+        };
+
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             uDeltaFreq: { value: 2.0 }, 
             uBetaFreq: { value: 40.0 },
-            uStarted: { value: 0.0 } // 預設 0.0 代表初始畫面為全黑
+            uPaletteType: { value: 1.0 },
+            uPatternType: { value: 0.0 },
+            uStarted: { value: 0.0 } // 預設 0.0 全黑靜態
         };
 
-        // 顯示卡的魔法公式：GLSL
+        // 升級版顯示卡魔法公式：全面支援調色盤與花紋樣式切換
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
             uniform float uDeltaFreq;
             uniform float uBetaFreq;
+            uniform float uPaletteType;
+            uniform float uPatternType;
             uniform float uStarted; 
 
-            vec3 palette( float t ){ 
+            // 動態調色盤函數
+            vec3 palette( float t, float type ){ 
                 vec3 a = vec3(1.248, 0.5, 0.5);
                 vec3 b = vec3(-0.042, 0.5, 0.5);
                 vec3 c = vec3(1.0, 1.0, 1.0);
                 vec3 d = vec3(0.0, 0.333, 0.667);
+                
+                if(type > 1.5 && type < 2.5) { // Color palette 2: 活力慶典
+                    a = vec3(0.8, 0.4, 0.2); b = vec3(0.2, 0.4, 0.2); c = vec3(2.0, 1.0, 1.0); d = vec3(0.0, 0.25, 0.25);
+                } else if(type > 2.5) { // Color palette 3: 深度冥想黑金
+                    a = vec3(0.5, 0.5, 0.5); b = vec3(0.5, 0.5, 0.5); c = vec3(1.0, 1.0, 1.0); d = vec3(0.0, 0.1, 0.2);
+                }
                 return a + b*cos( 6.283185*(c*t+d) );
             }
 
@@ -80,15 +91,25 @@
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
                 float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
-                vec3 backgroundColor = palette(bg_t);
+                vec3 backgroundColor = palette(bg_t, uPaletteType);
 
                 vec2 symmetric_uv = abs(uv_center);
-                vec2 cornerTarget = vec2(1.7, 1.0);
-                vec2 r_uv = symmetric_uv - cornerTarget;
+                vec2 r_uv = symmetric_uv - vec2(1.7, 1.0);
                 
                 float r = length(r_uv);
                 float angle = atan(r_uv.y, r_uv.x);
-                float base_d = r * (1.0 + 0.2 * cos(angle * 4.0));
+                
+                // 根據使用者選的圖案樣式更改數學公式
+                float patternModifier = 1.0;
+                if(uPatternType > 0.5 && uPatternType < 1.5) {
+                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); // 花朵花紋 (5瓣)
+                } else if(uPatternType > 1.5) {
+                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); // 葉片脈絡花紋
+                } else {
+                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); // 預設幾何
+                }
+                
+                float base_d = r * patternModifier;
 
                 float delta = sin(base_d * uDeltaFreq - iTime * 1.5) * 0.3; 
                 float beta  = sin(base_d * uBetaFreq + iTime * 12.0) * 0.05; 
@@ -98,7 +119,7 @@
                 final_glow *= exp(-base_d * 0.2);
 
                 float rippleMixControl = clamp(final_glow, 0.0, 1.0);
-                vec3 rippleColor = palette(iTime * 0.1 + 0.5); 
+                vec3 rippleColor = palette(iTime * 0.1 + 0.5, uPaletteType); 
 
                 vec3 finalColor = mix(backgroundColor, rippleColor, rippleMixControl);
                 fragColor = vec4(finalColor, 1.0);
@@ -109,6 +130,105 @@
             }
         `;
 
+        // --- 核心時序控制：Miro 流程圖狀態機管理引擎 ---
+        let currentStep = 1;
+        const htmlContent = document.getElementById('content-area');
+        const cardNode = document.getElementById('dialog-card');
+
+        function updateFlow() {
+            // 優雅的淡入淡出過渡效果
+            cardNode.style.opacity = '0';
+            cardNode.style.transform = 'scale(0.95)';
+            
+            setTimeout(() => {
+                switch(currentStep) {
+                    case 1:
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold tracking-wider">Hello there ...</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000); // 2秒後去步驟二
+                        break;
+                    case 2:
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold tracking-wider">How's your day?</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        setTimeout(() => { currentStep = 3; updateFlow(); }, 2000); // 2秒後去步驟三
+                        break;
+                    case 3:
+                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200 leading-relaxed">Just take a breathe,<br>and tell us ...</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        setTimeout(() => { currentStep = 4; updateFlow(); }, 2000); // 2秒後進入第一題
+                        break;
+                    case 4: // Option 1: 選擇心情 (綁定腦波頻率)
+                        htmlContent.innerHTML = `
+                            <h3 class="text-lg text-gray-400 mb-4">Choose your vibe:</h3>
+                            <div class="space-y-3">
+                                <button onclick="selectMood(1.0, 12.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">1. I'm good 😊</button>
+                                <button onclick="selectMood(6.0, 10.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">2. Just a bit tired ...</button>
+                                <button onclick="selectMood(25.0, 45.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">3. Full of energy !!</button>
+                            </div>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        break;
+                    case 5:
+                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200">What are you planning to do next ?</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        setTimeout(() => { currentStep = 6; updateFlow(); }, 2000);
+                        break;
+                    case 6: // Option 2: 選擇計畫 (綁定色盤)
+                        htmlContent.innerHTML = `
+                            <h3 class="text-lg text-gray-400 mb-4">Your next plan:</h3>
+                            <div class="space-y-3">
+                                <button onclick="selectPalette(1.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">1. Relax on my couch</button>
+                                <button onclick="selectPalette(2.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">2. Having fun</button>
+                                <button onclick="selectPalette(3.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">3. Party !</button>
+                            </div>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        break;
+                    case 7: // Option 3: 選擇符號圖案 (綁定 Shader 花紋)
+                        htmlContent.innerHTML = `
+                            <h3 class="text-lg text-gray-400 mb-4">Pick a symbol that guides you:</h3>
+                            <div class="grid grid-cols-3 gap-3">
+                                <button onclick="selectPattern(1.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">🌸</button>
+                                <button onclick="selectPattern(2.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">🌿</button>
+                                <button onclick="selectPattern(0.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">⭐</button>
+                            </div>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        break;
+                    case 8:
+                        htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse">A moment before the gift ...</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); // 停留3秒
+                        break;
+                    case 9:
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">And here you are !</h2>`;
+                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        
+                        // 2秒後關閉 UI 大盒子，全面啟動動畫與錄影
+                        setTimeout(() => {
+                            // 隱藏遮罩大盒子
+                            document.getElementById('ui-container').style.display = 'none';
+                            // 傳遞參數給顯示卡，喚醒動畫
+                            shaderUniforms.uDeltaFreq.value = userChoices.delta;
+                            shaderUniforms.uBetaFreq.value = userChoices.beta;
+                            shaderUniforms.uPaletteType.value = userChoices.paletteType;
+                            shaderUniforms.uPatternType.value = userChoices.patternType;
+                            shaderUniforms.uStarted.value = 1.0;
+                            
+                            // 浮現右下角錄製提示按鈕
+                            document.getElementById('download-btn').style.display = 'flex';
+                            
+                            // 核心：背景默默啟動 30 秒完美錄製
+                            startRecordingAndDownload();
+                        }, 2000);
+                        break;
+                }
+            }, 400);
+        }
+
+        // 測驗選項綁定函數群
+        function selectMood(d, b) { userChoices.delta = d; userChoices.beta = b; currentStep = 5; updateFlow(); }
+        function selectPalette(p) { userChoices.paletteType = p; currentStep = 7; updateFlow(); }
+        function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
+
+        // --- Three.js & Shader 底層初始化架構 ---
         function initShader() {
             const canvas = document.getElementById('webgl-canvas');
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -128,6 +248,9 @@
 
             window.addEventListener('resize', onWindowResize);
             animate(0);
+            
+            // 啟動測驗時序
+            updateFlow();
         }
 
         function animate(timestamp) {
@@ -141,48 +264,11 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
-        // 處理使用者點擊按鈕的互動
-        function generateGift(mood) {
-            // 1. 喚醒 Shader 畫面
-            shaderUniforms.uStarted.value = 1.0;
-
-            if (mood === 'anxious') {
-                shaderUniforms.uDeltaFreq.value = 1.5;  
-                shaderUniforms.uBetaFreq.value = 10.0;  
-            } else if (mood === 'celebrate') {
-                shaderUniforms.uDeltaFreq.value = 6.0;  
-                shaderUniforms.uBetaFreq.value = 60.0;  
-            }
-
-            // 2. 顯示「錄製中」的狀態字樣，並隱藏原本的心情選項按鈕
-            document.getElementById('loading-status').classList.remove('hidden');
-            document.querySelector('.space-y-4').style.display = 'none';
-
-            // 3. 觸發影片錄製（在背景默默錄足 30 秒）
-            startRecordingAndDownload();
-
-            // ⏱️ 定時器一：【5秒後】讓整個中央文字框漂亮地淡出並完全消失
-            setTimeout(() => {
-                const uiBox = document.getElementById('ui-container');
-                uiBox.style.opacity = '0'; 
-                setTimeout(() => {
-                    uiBox.style.display = 'none'; 
-                }, 1000);
-            }, 5000); 
-
-            // ⏱️ 定時器二：【10秒後】讓右下角的下載按鈕悄悄浮現（此時呈現灰色、無法點擊狀態）
-            setTimeout(() => {
-                const downloadBtn = document.getElementById('download-btn');
-                downloadBtn.style.display = 'flex'; 
-            }, 10000); 
-        }
-
-        // 核心功能：錄製畫布並於 30 秒後將影片綁定到右下角按鈕
+        // --- 安全非同步錄製與跳脫下載核心 ---
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
-            const stream = canvas.captureStream(30); // 30 FPS 錄製
+            const stream = canvas.captureStream(30); 
             
-            // 安全修正：相容各家瀏覽器
             let options = { mimeType: 'video/webm;codecs=vp9' };
             if (!MediaRecorder.isTypeSupported(options.mimeType)) {
                 options = { mimeType: 'video/webm' };
@@ -195,34 +281,33 @@
                 if (e.data.size > 0) chunks.push(e.data);
             };
 
-            // 💡 修正後的大括號：確保 onstop 只負責錄影完畢後的「換顏色」和「檔案綁定」
             mediaRecorder.onstop = () => {
                 const blob = new Blob(chunks, { type: 'video/webm' });
                 const url = URL.createObjectURL(blob);
 
                 const downloadBtn = document.getElementById('download-btn');
                 
-                // 30秒到了：按鈕染成綠色、解鎖滑鼠點擊
-                downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto";
-                downloadBtn.innerHTML = "📥 Download Ready (30s)";
+                // 30秒錄影完畢：解鎖按鈕、變色
+                downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto animate-bounce";
+                downloadBtn.innerHTML = "📥 Download Your 30s Gift";
                 
-                // 使用者手動點擊綠色按鈕時，動清出一個隱形傳送門直接下載
+                // 動態隱形傳送門安全下載
                 downloadBtn.onclick = (e) => {
                     e.preventDefault();
                     const tempAnchor = document.createElement('a');
                     tempAnchor.style.display = 'none';
                     tempAnchor.href = url;
-                    tempAnchor.download = 'Your_30s_Brainwave_Gift.webm';
+                    tempAnchor.download = 'Your_Brainwave_Gift_30s.webm';
                     document.body.appendChild(tempAnchor);
                     tempAnchor.click();
                     document.body.removeChild(tempAnchor);
                 };
             };
 
-            // 💡 修正後的位置：這兩行必須獨立在 onstop 肚子外面，錄影才會真正啟動！
+            // 正式啟動後台錄影
             mediaRecorder.start();
 
-            // ⏱️ 定時器三：【30秒後】自動停止錄影，觸發內部的變色打包邏輯
+            // 精準計時 30 秒後自動收卷打包
             setTimeout(() => {
                 mediaRecorder.stop();
             }, 30000); 
