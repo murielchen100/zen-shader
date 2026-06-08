@@ -4,45 +4,50 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome to the Zen space</title>
+    <!-- 引入極簡網頁排版庫 Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- 引入網頁 3D/Shader 庫 Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        /* 互動 UI 容器：確保永遠疊在畫布最上層 */
-        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.85); }
-        /* 雲朵般浮動的微動畫效果 */
-        .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.8s ease, transform 0.8s ease; }
+        /* 互動 UI 容器：疊在畫布最上層 */
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
+        /* 雲朵般輕微浮動的動態效果 */
+        .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.6s ease, transform 0.6s ease; }
         @keyframes floatMotion {
-            0%, 100% { transform: translateY(0px) scale(1); }
-            50% { transform: translateY(-10px) scale(1.02); }
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-8px); }
         }
     </style>
 </head>
 <body>
 
+    <!-- 底層：Shader 的畫布 -->
     <canvas id="webgl-canvas"></canvas>
 
+    <!-- 上層：問答導引字卡 -->
     <div id="ui-container">
         <div id="dialog-card" class="cloud-box bg-white/10 backdrop-blur-xl p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/10 shadow-2xl mx-4">
             <div id="content-area"></div>
         </div>
     </div>
 
+    <!-- 右下角下載按鈕：30秒錄影完畢後會解鎖變綠 -->
     <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-600 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2 transition-all duration-500">
-        ⏳ Generating your 30s gift...
+        ⏳ Generating your video...
     </a>
 
     <script>
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 核心參數儲存：使用者在測驗中留下的印記
+        // 儲存測驗答案的參數
         let userChoices = {
             delta: 2.0,
             beta: 40.0,
-            paletteType: 1.0,  // 1: 預設, 2: 繽紛, 3: 暗黑活力
-            patternType: 0.0   // 0: 幾何漣漪, 1: 花朵形狀, 2: 樹葉脈絡
+            paletteType: 1.0,  
+            patternType: 0.0   
         };
 
         let shaderUniforms = {
@@ -52,10 +57,10 @@
             uBetaFreq: { value: 40.0 },
             uPaletteType: { value: 1.0 },
             uPatternType: { value: 0.0 },
-            uStarted: { value: 0.0 } // 預設 0.0 全黑靜態
+            uStarted: { value: 0.0 } // 預設 0.0 畫面全黑
         };
 
-        // 升級版顯示卡魔法公式：全面支援調色盤與花紋樣式切換
+        // 支援多重花紋與調色盤的 GLSL Shader
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
@@ -65,17 +70,16 @@
             uniform float uPatternType;
             uniform float uStarted; 
 
-            // 動態調色盤函數
             vec3 palette( float t, float type ){ 
                 vec3 a = vec3(1.248, 0.5, 0.5);
                 vec3 b = vec3(-0.042, 0.5, 0.5);
                 vec3 c = vec3(1.0, 1.0, 1.0);
                 vec3 d = vec3(0.0, 0.333, 0.667);
                 
-                if(type > 1.5 && type < 2.5) { // Color palette 2: 活力慶典
+                if(type > 1.5 && type < 2.5) { // Palette 2
                     a = vec3(0.8, 0.4, 0.2); b = vec3(0.2, 0.4, 0.2); c = vec3(2.0, 1.0, 1.0); d = vec3(0.0, 0.25, 0.25);
-                } else if(type > 2.5) { // Color palette 3: 深度冥想黑金
-                    a = vec3(0.5, 0.5, 0.5); b = vec3(0.5, 0.5, 0.5); c = vec3(1.0, 1.0, 1.0); d = vec3(0.0, 0.1, 0.2);
+                } else if(type > 2.5) { // Palette 3
+                    a = vec3(0.2, 0.5, 0.7); b = vec3(0.4, 0.2, 0.2); c = vec3(1.0, 1.0, 1.0); d = vec3(0.0, 0.1, 0.3);
                 }
                 return a + b*cos( 6.283185*(c*t+d) );
             }
@@ -99,14 +103,14 @@
                 float r = length(r_uv);
                 float angle = atan(r_uv.y, r_uv.x);
                 
-                // 根據使用者選的圖案樣式更改數學公式
+                // 根據 Option 3 選擇切換圖案 (Flower / Leave / Color Pattern)
                 float patternModifier = 1.0;
                 if(uPatternType > 0.5 && uPatternType < 1.5) {
-                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); // 花朵花紋 (5瓣)
+                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); // 🌸 Flower Pattern
                 } else if(uPatternType > 1.5) {
-                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); // 葉片脈絡花紋
+                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); // 🌿 Leave Pattern
                 } else {
-                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); // 預設幾何
+                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); // ⭐ Color Palette Shader 預設幾何
                 }
                 
                 float base_d = r * patternModifier;
@@ -130,92 +134,89 @@
             }
         `;
 
-        // --- 核心時序控制：Miro 流程圖狀態機管理引擎 ---
+        // --- 中性自然語感：Miro 流程狀態機管理系統 ---
         let currentStep = 1;
         const htmlContent = document.getElementById('content-area');
         const cardNode = document.getElementById('dialog-card');
 
         function updateFlow() {
-            // 優雅的淡入淡出過渡效果
             cardNode.style.opacity = '0';
-            cardNode.style.transform = 'scale(0.95)';
+            cardNode.style.transform = 'scale(0.98)';
             
             setTimeout(() => {
                 switch(currentStep) {
-                    case 1:
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold tracking-wider">Hello there ...</h2>`;
+                    case 1: // Output 1
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">Hello there...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000); // 2秒後去步驟二
+                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000);
                         break;
-                    case 2:
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold tracking-wider">How's your day?</h2>`;
+                    case 2: // Output 2
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">How's your day going?</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 3; updateFlow(); }, 2000); // 2秒後去步驟三
+                        setTimeout(() => { currentStep = 3; updateFlow(); }, 2000);
                         break;
-                    case 3:
-                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200 leading-relaxed">Just take a breathe,<br>and tell us ...</h2>`;
+                    case 3: // Output 3
+                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200 leading-relaxed">Take a moment to check in with yourself...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 4; updateFlow(); }, 2000); // 2秒後進入第一題
+                        setTimeout(() => { currentStep = 4; updateFlow(); }, 2000);
                         break;
-                    case 4: // Option 1: 選擇心情 (綁定腦波頻率)
+                    case 4: // Option 1 (綁定腦波頻率)
                         htmlContent.innerHTML = `
-                            <h3 class="text-lg text-gray-400 mb-4">Choose your vibe:</h3>
+                            <h3 class="text-base font-semibold text-gray-400 mb-5">How are you feeling right now?</h3>
                             <div class="space-y-3">
-                                <button onclick="selectMood(1.0, 12.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">1. I'm good 😊</button>
-                                <button onclick="selectMood(6.0, 10.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">2. Just a bit tired ...</button>
-                                <button onclick="selectMood(25.0, 45.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">3. Full of energy !!</button>
+                                <button onclick="selectMood(10.0, 15.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Calm and relaxed</button>
+                                <button onclick="selectMood(6.0, 10.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. A bit tired or stressed</button>
+                                <button onclick="selectMood(20.0, 40.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Energized and motivated</button>
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 5:
-                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200">What are you planning to do next ?</h2>`;
+                    case 5: // Output 4
+                        htmlContent.innerHTML = `<h2 class="text-xl font-medium text-gray-200">What are your plans for the rest of the day?</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 6; updateFlow(); }, 2000);
                         break;
-                    case 6: // Option 2: 選擇計畫 (綁定色盤)
+                    case 6: // Option 2 (綁定 Color Palette)
                         htmlContent.innerHTML = `
-                            <h3 class="text-lg text-gray-400 mb-4">Your next plan:</h3>
+                            <h3 class="text-base font-semibold text-gray-400 mb-5">Your next plan:</h3>
                             <div class="space-y-3">
-                                <button onclick="selectPalette(1.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">1. Relax on my couch</button>
-                                <button onclick="selectPalette(2.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">2. Having fun</button>
-                                <button onclick="selectPalette(3.0)" class="w-full bg-white/10 hover:bg-white/20 text-white font-medium py-3 px-4 rounded-xl transition cursor-pointer border border-white/10">3. Party !</button>
+                                <button onclick="selectPalette(1.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Just unwind and chill</button>
+                                <button onclick="selectPalette(2.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. Do something fun</button>
+                                <button onclick="selectPalette(3.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Stay active or go out</button>
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 7: // Option 3: 選擇符號圖案 (綁定 Shader 花紋)
+                    case 7: // Option 3 (圖案：Flower / Leave / Color Shader)
                         htmlContent.innerHTML = `
-                            <h3 class="text-lg text-gray-400 mb-4">Pick a symbol that guides you:</h3>
-                            <div class="grid grid-cols-3 gap-3">
-                                <button onclick="selectPattern(1.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">🌸</button>
-                                <button onclick="selectPattern(2.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">🌿</button>
-                                <button onclick="selectPattern(0.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/10">⭐</button>
+                            <h3 class="text-base font-semibold text-gray-400 mb-5">Pick a visual pattern that catches your eye:</h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <button onclick="selectPattern(1.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌸</button>
+                                <button onclick="selectPattern(2.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌿</button>
+                                <button onclick="selectPattern(0.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">⭐</button>
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 8:
-                        htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse">A moment before the gift ...</h2>`;
+                    case 8: // Output 5
+                        htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); // 停留3秒
+                        setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
                         break;
-                    case 9:
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">And here you are !</h2>`;
+                    case 9: // Output 6
+                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Here is your space. Enjoy.</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
-                        // 2秒後關閉 UI 大盒子，全面啟動動畫與錄影
+                        // 2秒後 UI 框完美消失，Shader 啟動並錄影
                         setTimeout(() => {
-                            // 隱藏遮罩大盒子
                             document.getElementById('ui-container').style.display = 'none';
-                            // 傳遞參數給顯示卡，喚醒動畫
+                            
+                            // 將記錄下來的客製化測驗結果一併送進顯示卡
                             shaderUniforms.uDeltaFreq.value = userChoices.delta;
                             shaderUniforms.uBetaFreq.value = userChoices.beta;
                             shaderUniforms.uPaletteType.value = userChoices.paletteType;
                             shaderUniforms.uPatternType.value = userChoices.patternType;
                             shaderUniforms.uStarted.value = 1.0;
                             
-                            // 浮現右下角錄製提示按鈕
+                            // 呼叫右下角錄影機制
                             document.getElementById('download-btn').style.display = 'flex';
-                            
-                            // 核心：背景默默啟動 30 秒完美錄製
                             startRecordingAndDownload();
                         }, 2000);
                         break;
@@ -223,12 +224,11 @@
             }, 400);
         }
 
-        // 測驗選項綁定函數群
         function selectMood(d, b) { userChoices.delta = d; userChoices.beta = b; currentStep = 5; updateFlow(); }
         function selectPalette(p) { userChoices.paletteType = p; currentStep = 7; updateFlow(); }
         function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
 
-        // --- Three.js & Shader 底層初始化架構 ---
+        // --- Three.js 初始化基礎架構 ---
         function initShader() {
             const canvas = document.getElementById('webgl-canvas');
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -249,7 +249,7 @@
             window.addEventListener('resize', onWindowResize);
             animate(0);
             
-            // 啟動測驗時序
+            // 觸發狀態機
             updateFlow();
         }
 
@@ -264,7 +264,7 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
-        // --- 安全非同步錄製與跳脫下載核心 ---
+        // --- 靜默背景 Canvas 錄影與檔案下載綁定 ---
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
             const stream = canvas.captureStream(30); 
@@ -287,27 +287,25 @@
 
                 const downloadBtn = document.getElementById('download-btn');
                 
-                // 30秒錄影完畢：解鎖按鈕、變色
+                // 30秒錄影結束：變綠、解鎖滑鼠點擊、跳躍動畫
                 downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto animate-bounce";
-                downloadBtn.innerHTML = "📥 Download Your 30s Gift";
+                downloadBtn.innerHTML = "📥 Download Your Video (30s)";
                 
-                // 動態隱形傳送門安全下載
                 downloadBtn.onclick = (e) => {
                     e.preventDefault();
                     const tempAnchor = document.createElement('a');
                     tempAnchor.style.display = 'none';
                     tempAnchor.href = url;
-                    tempAnchor.download = 'Your_Brainwave_Gift_30s.webm';
+                    tempAnchor.download = 'My_Custom_Space_Video.webm';
                     document.body.appendChild(tempAnchor);
                     tempAnchor.click();
                     document.body.removeChild(tempAnchor);
                 };
             };
 
-            // 正式啟動後台錄影
             mediaRecorder.start();
 
-            // 精準計時 30 秒後自動收卷打包
+            // 錄足 30 秒自動結束
             setTimeout(() => {
                 mediaRecorder.stop();
             }, 30000); 
