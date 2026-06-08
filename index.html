@@ -28,10 +28,11 @@
                 <button onclick="generateGift('celebrate')" class="w-full bg-pink-500 hover:bg-pink-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
                     🎉 Time to Celebrate (Tune: Energetic Beta Waves)
                 </button>
-                <a id="download-btn" class="hidden bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer">
-    📥 Download Your Brainwave Video
-            </a>
             </div>
+
+            <a id="download-btn" style="display: none;" class="w-full bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-4 rounded-xl transition shadow-lg cursor-pointer text-center block mt-4">
+                📥 Download Your Brainwave Video
+            </a>
             
             <div id="loading-status" class="hidden mt-6 text-cyan-300 animate-pulse">
                 Packaging your exclusive energy video, please wait...
@@ -43,21 +44,22 @@
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 這裡新增了 uStarted 變數，預設是 0.0（代表尚未啟動，顯示全黑）
+        // 傳遞給 Shader 的變數群，包含 uStarted 開關
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             uDeltaFreq: { value: 2.0 }, 
             uBetaFreq: { value: 40.0 },
-            uStarted: { value: 0.0 } 
+            uStarted: { value: 0.0 } // 💡 預設 0.0 代表初始畫面為全黑
         };
 
+        // 顯示卡的魔法公式：GLSL (C語言風格)
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
             uniform float uDeltaFreq;
             uniform float uBetaFreq;
-            uniform float uStarted; //  接收來自網頁的開關訊號
+            uniform float uStarted; 
 
             vec3 palette( float t ){ 
                 vec3 a = vec3(1.248, 0.5, 0.5);
@@ -69,13 +71,13 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
-                // 核心魔術：如果 uStarted 小於 0.5，直接輸出黑色並結束計算，不再往下跑
+                // 💡 檢查開關：如果還沒點擊按鈕 (uStarted < 0.5)，直接塗黑並中斷執行
                 if (uStarted < 0.5) {
                     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
                     return;
                 }
 
-                // 以下是原本絢麗的腦波 Shader 邏輯，只有在 uStarted == 1.0 時才會執行
+                // 當 uStarted 被改為 1.0 時，才會執行底下的絢麗動畫計算
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
@@ -132,7 +134,7 @@
 
         function animate(timestamp) {
             animationFrameId = requestAnimationFrame(animate);
-            shaderUniforms.iTime.value = timestamp * 0.001;
+            shaderUniforms.iTime.value = timestamp * 0.001; 
             renderer.render(scene, camera);
         }
 
@@ -141,32 +143,33 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
+        // 處理使用者點擊按鈕的互動
         function generateGift(mood) {
-         // 關鍵動作：使用者一點擊，立刻把開關打開（設為 1.0），背景瞬間亮起！
+            // 💡 點擊瞬間接通電線，讓 Shader 畫面從全黑甦醒
             shaderUniforms.uStarted.value = 1.0;
 
             if (mood === 'anxious') {
-            shaderUniforms.uDeltaFreq.value = 1.5;  
-            shaderUniforms.uBetaFreq.value = 10.0;  
+                shaderUniforms.uDeltaFreq.value = 1.5;  
+                shaderUniforms.uBetaFreq.value = 10.0;  
             } else if (mood === 'celebrate') {
-            shaderUniforms.uDeltaFreq.value = 6.0;  
-            shaderUniforms.uBetaFreq.value = 60.0;  
+                shaderUniforms.uDeltaFreq.value = 6.0;  
+                shaderUniforms.uBetaFreq.value = 60.0;  
             }
 
-            //  調整這裡：秀出「錄製中...」的提示文字
+            // 💡 顯示「錄製中」的狀態字樣
             document.getElementById('loading-status').classList.remove('hidden');
-    
-            //  調整這裡：把原本的兩個心情按鈕先隱藏起來，免得使用者重複點擊
-            // 這裡我們直接抓取按鈕的父層（space-y-4 那個 div）來隱藏它
+            
+            // 💡 隱藏原本的心情選項按鈕，防止使用者重複點擊
             document.querySelector('.space-y-4').style.display = 'none';
 
-            // 啟動錄影
+            // 觸發影片錄製
             startRecordingAndDownload();
-         }
+        }
 
+        // 核心功能：錄製畫布並於 20 秒後生成安全下載連結
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
-            const stream = canvas.captureStream(30); 
+            const stream = canvas.captureStream(30); // 30 FPS 錄製
             const mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
             const chunks = [];
 
@@ -174,23 +177,27 @@
                 if (e.data.size > 0) chunks.push(e.data);
             };
 
-        mediaRecorder.onstop = () => {
-            // 1. 打包影片
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-    
-            // 2. 找到剛剛那個隱藏的下載按鈕
-            const downloadBtn = document.getElementById('download-btn');
-    
-            // 3. 把影片網址塞給按鈕，並給檔案一個名字
-            downloadBtn.href = url;
-            downloadBtn.download = 'Your_Brainwave_Gift.webm';
-    
-            // 4. 讓按鈕顯示在畫面上，讓使用者自己點擊！
-            downloadBtn.classList.remove('hidden');
-             };
+            mediaRecorder.onstop = () => {
+                // 將錄製的片段打包成檔案網址
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                
+                // 隱藏「Packaging...」提示文字
+                document.getElementById('loading-status').classList.add('hidden');
 
+                // 找到 HTML 裡的下載按鈕，把檔案塞給它
+                const downloadBtn = document.getElementById('download-btn');
+                downloadBtn.href = url;
+                downloadBtn.download = 'Your_Brainwave_Gift.webm';
+                
+                // 💡 解除隱藏，讓綠色的安全下載按鈕秀在畫面上！
+                downloadBtn.style.display = 'block';
+            };
+
+            // 開始錄製
             mediaRecorder.start();
+
+            // 💡 延長錄製時間：設定為 20 秒 (20000 毫秒)
             setTimeout(() => {
                 mediaRecorder.stop();
             }, 20000);
