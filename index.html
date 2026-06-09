@@ -35,9 +35,8 @@
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 全域音訊環境與控制變數
         let audioCtx = null;
-        let startAudioFunctions = null; // 用來儲存排定好的播放排程
+        let startAudioFunctions = null; 
 
         let userChoices = {
             delta: 2.0,
@@ -154,7 +153,7 @@
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 4; updateFlow(); }, 2000);
                         break;
-                    case 4: // Option 1：選擇狀態（此時手動點擊會解鎖瀏覽器音訊限制）
+                    case 4: 
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">How are you feeling right now?</h3>
                             <div class="space-y-3">
@@ -169,7 +168,7 @@
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 6; updateFlow(); }, 2000);
                         break;
-                    case 6: // Option 2
+                    case 6: 
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">Your next plan:</h3>
                             <div class="space-y-3">
@@ -179,7 +178,7 @@
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 7: // Option 3
+                    case 7: 
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">Pick a visual pattern that catches your eye:</h3>
                             <div class="grid grid-cols-3 gap-4">
@@ -189,30 +188,30 @@
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 8:
+                    case 8: // Output 5: 在這個當下，音樂開始安靜地 Fade in 淡入
                         htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
+                        
+                        // 🎧 在這裡觸發音樂播放！
+                        if (startAudioFunctions) startAudioFunctions();
+
                         setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
                         break;
-                    case 9:
+                    case 9: // Output 6
                         htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Here is your space. Enjoy.</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
-                        // 2秒後 UI 關閉，視聽完全同步爆發
                         setTimeout(() => {
                             document.getElementById('ui-container').style.display = 'none';
                             
-                            // 1. 啟動視覺 Shader
+                            // 啟動視覺 Shader
                             shaderUniforms.uDeltaFreq.value = userChoices.delta;
                             shaderUniforms.uBetaFreq.value = userChoices.beta;
                             shaderUniforms.uPaletteType.value = userChoices.paletteType;
                             shaderUniforms.uPatternType.value = userChoices.patternType;
                             shaderUniforms.uStarted.value = 1.0;
                             
-                            // 2. 啟動聽覺音效（執行剛剛排定好的 Web Audio）
-                            if (startAudioFunctions) startAudioFunctions();
-
-                            // 3. 右下角開始默默錄影
+                            // 右下角開始默默錄影
                             document.getElementById('download-btn').style.display = 'flex';
                             startRecordingAndDownload();
                         }, 2000);
@@ -221,12 +220,10 @@
             }, 400);
         }
 
-        // 選擇心情時，順便在背景秘密初始化 Web Audio 公式
         function selectMood(d, b, moodIndex) { 
             userChoices.delta = d; 
             userChoices.beta = b; 
             
-            // 初始化音訊環境（必須在 click 事件內執行）
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             setupBrainwaveAudio(moodIndex);
 
@@ -238,39 +235,48 @@
         function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
 
         // ========================================================
-        // 🔊 WEB AUDIO API 數位音訊合成核心引擎
+        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (全域音量控制版)
         // ========================================================
         function setupBrainwaveAudio(moodIndex) {
-            let chord = [349.23, 440.00, 523.25]; // 預設 F Major
-            let alphaDiff = 10.0;                 // 10Hz Alpha
+            let chord = [349.23, 440.00, 523.25]; 
+            let alphaDiff = 10.0;                 
             let bpm = 110;
             let bassPattern = [87.31, 87.31, 130.81, 87.31];
             let noiseFilterFreq = 700;
             let noiseType = 'lowpass';
 
-            // 根據使用者選的狀態，切換不同的數學和弦、環境音與節奏速度
-            if (moodIndex === 2) { // Tired/Stressed -> 6Hz Theta + D minor 和弦 + 緩慢細雨聲
-                chord = [293.66, 349.23, 440.00]; // D Minor (憂鬱、深沉)
-                alphaDiff = 6.0;                  // 6Hz Theta 深度放鬆波
-                bpm = 70;                         // 慢速 70 BPM
-                bassPattern = [73.42, 73.42, 110.00, 73.42]; // D2 低音
-                noiseFilterFreq = 400;            // 更低沉的環境雨聲
-            } else if (moodIndex === 3) { // Energized -> 40Hz Gamma + A Major 增和弦 + 激昂風鳴聲
-                chord = [440.00, 554.37, 698.46]; // A Augmented (明亮、有未來感)
-                alphaDiff = 40.0;                 // 40Hz 高感度 Gamma 高度專注波
-                bpm = 135;                        // 快速高能量 135 BPM
-                bassPattern = [110.00, 164.81, 110.00, 220.00]; // A2 高動態低音線
-                noiseFilterFreq = 1200;           // 尖銳、流動的風聲
+            if (moodIndex === 2) { 
+                chord = [293.66, 349.23, 440.00]; 
+                alphaDiff = 6.0;                  
+                bpm = 70;                         
+                bassPattern = [73.42, 73.42, 110.00, 73.42]; 
+                noiseFilterFreq = 400;            
+            } else if (moodIndex === 3) { 
+                chord = [440.00, 554.37, 698.46]; 
+                alphaDiff = 40.0;                 
+                bpm = 135;                        
+                bassPattern = [110.00, 164.81, 110.00, 220.00]; 
+                noiseFilterFreq = 1200;           
                 noiseType = 'bandpass';
             }
 
-            // 封裝排程，等到最後主秀再真正播放
             startAudioFunctions = () => {
                 if (audioCtx.state === 'suspended') {
                     audioCtx.resume();
                 }
 
-                // A. 生成客製化環境背景雜訊 (海浪 / 雨聲 / 風聲)
+                const time = audioCtx.currentTime;
+
+                // 🎛️ 1. 建立「全域總音量控制器 (Main Gain)」
+                const mainGain = audioCtx.createGain();
+                // 初始音量設為 0.0 (完全靜音)
+                mainGain.gain.setValueAtTime(0.0, time);
+                // 在 3.0 秒內平滑拉高到 0.35 (優雅淡入，且聲音比之前更飽滿明亮)
+                mainGain.gain.linearRampToValueAtTime(0.35, time + 3.0);
+                // 把總控制器連上喇叭
+                mainGain.connect(audioCtx.destination);
+
+                // A. 環境背景音 (海浪 / 雨聲 / 風聲)
                 const bufferSize = 4 * audioCtx.sampleRate;
                 const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
                 const output = noiseBuffer.getChannelData(0);
@@ -280,68 +286,76 @@
                 noiseSource.buffer = noiseBuffer; noiseSource.loop = true;
 
                 const waveGain = audioCtx.createGain();
-                waveGain.gain.setValueAtTime(moodIndex === 3 ? 0.008 : 0.015, audioCtx.currentTime);
+                waveGain.gain.setValueAtTime(moodIndex === 3 ? 0.04 : 0.08, time);
                 
                 const waveOsc = audioCtx.createOscillator();
-                waveOsc.frequency.value = moodIndex === 2 ? 0.2 : 0.1; // 雨聲起伏稍快，海浪稍慢
+                waveOsc.frequency.value = moodIndex === 2 ? 0.2 : 0.1; 
                 const waveGainMod = audioCtx.createGain();
-                waveGainMod.gain.value = 0.02; 
+                waveGainMod.gain.value = 0.05; 
                 
                 waveOsc.connect(waveGainMod).connect(waveGain.gain);
-                waveOsc.start();
+                waveOsc.start(time);
 
                 const filter = audioCtx.createBiquadFilter();
                 filter.type = noiseType; filter.frequency.value = noiseFilterFreq;
 
-                noiseSource.connect(filter).connect(waveGain).connect(audioCtx.destination);
-                noiseSource.start();
+                // 🔗 連接到全域 mainGain
+                noiseSource.connect(filter).connect(waveGain).connect(mainGain);
+                noiseSource.start(time);
 
-                // B. 生成雙耳節拍基礎墊音 (Binaural Beats)
+                // B. 雙耳節拍基礎墊音 (和弦)
                 chord.forEach(freq => {
                     const pannerLeft = audioCtx.createStereoPanner(); pannerLeft.pan.value = -1;
                     const pannerRight = audioCtx.createStereoPanner(); pannerRight.pan.value = 1;
-                    const gainNode = audioCtx.createGain(); gainNode.gain.value = 0.008; // 微調音量，避免刺耳
+                    const gainNode = audioCtx.createGain(); 
+                    gainNode.gain.value = 0.04; // 個別提升和弦音量
 
                     const oscLeft = audioCtx.createOscillator(); oscLeft.type = 'sine'; oscLeft.frequency.value = freq;
                     const oscRight = audioCtx.createOscillator(); oscRight.type = 'sine'; oscRight.frequency.value = freq + alphaDiff;
 
                     oscLeft.connect(pannerLeft).connect(gainNode);
                     oscRight.connect(pannerRight).connect(gainNode);
-                    gainNode.connect(audioCtx.destination);
+                    
+                    // 🔗 連接到全域 mainGain
+                    gainNode.connect(mainGain);
 
-                    oscLeft.start(); oscRight.start();
+                    oscLeft.start(time); oscRight.start(time);
                 });
 
-                // C. 客製化低音編排器 (Bassline Sequencer)
+                // C. 低音編排器 (Bassline)
                 const noteLength = 60 / bpm;
                 let step = 0;
 
-                function scheduleBass(time) {
+                function scheduleBass(startTime) {
                     const bassOsc = audioCtx.createOscillator();
                     bassOsc.type = 'sine';
                     bassOsc.frequency.value = bassPattern[step % bassPattern.length];
 
                     const bassGain = audioCtx.createGain();
-                    bassGain.gain.setValueAtTime(0.0, time);
-                    bassGain.gain.linearRampToValueAtTime(moodIndex === 3 ? 0.22 : 0.18, time + 0.02); 
-                    bassGain.gain.exponentialRampToValueAtTime(0.001, time + noteLength * 0.9); 
+                    bassGain.gain.setValueAtTime(0.0, startTime);
+                    bassGain.gain.linearRampToValueAtTime(moodIndex === 3 ? 0.4 : 0.35, startTime + 0.02); 
+                    bassGain.gain.exponentialRampToValueAtTime(0.001, startTime + noteLength * 0.9); 
 
                     const bassFilter = audioCtx.createBiquadFilter();
                     bassFilter.type = 'lowpass';
                     bassFilter.frequency.value = 130;
 
-                    bassOsc.connect(bassGain).connect(bassFilter).connect(audioCtx.destination);
-                    bassOsc.start(time);
-                    bassOsc.stop(time + noteLength);
+                    // 🔗 連接到全域 mainGain
+                    bassOsc.connect(bassGain).connect(bassFilter).connect(mainGain);
+                    bassOsc.start(startTime);
+                    bassOsc.stop(startTime + noteLength);
 
                     step++;
-                    const nextNoteTime = time + noteLength;
+                    const nextNoteTime = startTime + noteLength;
                     setTimeout(() => {
-                        scheduleBass(nextNoteTime);
+                        // 確保如果使用者重新整理或關閉，排程不會出錯
+                        if(audioCtx && audioCtx.state !== 'closed') {
+                            scheduleBass(nextNoteTime);
+                        }
                     }, noteLength * 1000 - 50);
                 }
 
-                scheduleBass(audioCtx.currentTime + 0.2);
+                scheduleBass(time + 0.2);
             };
         }
 
