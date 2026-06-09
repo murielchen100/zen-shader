@@ -272,7 +272,7 @@
                 // 初始音量設為 0.0 (完全靜音)
                 mainGain.gain.setValueAtTime(0.0, time);
                 // 在 3.0 秒內平滑拉高到 0.35 (優雅淡入，且聲音比之前更飽滿明亮)
-                mainGain.gain.linearRampToValueAtTime(0.35, time + 5.0);
+                mainGain.gain.linearRampToValueAtTime(0.35, time + 8.0);
                 // 把總控制器連上喇叭
                 mainGain.connect(audioCtx.destination);
 
