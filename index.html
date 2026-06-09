@@ -4,16 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome to the Zen space</title>
-    <!-- 引入極簡網頁排版庫 Tailwind CSS -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-    <!-- 引入網頁 3D/Shader 庫 Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        /* 互動 UI 容器：疊在畫布最上層 */
         #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
-        /* 雲朵般輕微浮動的動態效果 */
         .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.6s ease, transform 0.6s ease; }
         @keyframes floatMotion {
             0%, 100% { transform: translateY(0px); }
@@ -23,17 +19,14 @@
 </head>
 <body>
 
-    <!-- 底層：Shader 的畫布 -->
     <canvas id="webgl-canvas"></canvas>
 
-    <!-- 上層：問答導引字卡 -->
     <div id="ui-container">
         <div id="dialog-card" class="cloud-box bg-white/10 backdrop-blur-xl p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/10 shadow-2xl mx-4">
             <div id="content-area"></div>
         </div>
     </div>
 
-    <!-- 右下角下載按鈕：30秒錄影完畢後會解鎖變綠 -->
     <a id="download-btn" style="display: none;" class="fixed bottom-6 right-6 z-50 bg-gray-600 text-white font-medium py-3 px-6 rounded-xl shadow-2xl pointer-events-none flex items-center gap-2 transition-all duration-500">
         ⏳ Generating your video...
     </a>
@@ -42,7 +35,10 @@
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        // 儲存測驗答案的參數
+        // 全域音訊環境與控制變數
+        let audioCtx = null;
+        let startAudioFunctions = null; // 用來儲存排定好的播放排程
+
         let userChoices = {
             delta: 2.0,
             beta: 40.0,
@@ -57,10 +53,9 @@
             uBetaFreq: { value: 40.0 },
             uPaletteType: { value: 1.0 },
             uPatternType: { value: 0.0 },
-            uStarted: { value: 0.0 } // 預設 0.0 畫面全黑
+            uStarted: { value: 0.0 } 
         };
 
-        // 支援多重花紋與調色盤的 GLSL Shader
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
@@ -76,9 +71,9 @@
                 vec3 c = vec3(1.0, 1.0, 1.0);
                 vec3 d = vec3(0.0, 0.333, 0.667);
                 
-                if(type > 1.5 && type < 2.5) { // Palette 2
+                if(type > 1.5 && type < 2.5) { 
                     a = vec3(0.8, 0.4, 0.2); b = vec3(0.2, 0.4, 0.2); c = vec3(2.0, 1.0, 1.0); d = vec3(0.0, 0.25, 0.25);
-                } else if(type > 2.5) { // Palette 3
+                } else if(type > 2.5) { 
                     a = vec3(0.2, 0.5, 0.7); b = vec3(0.4, 0.2, 0.2); c = vec3(1.0, 1.0, 1.0); d = vec3(0.0, 0.1, 0.3);
                 }
                 return a + b*cos( 6.283185*(c*t+d) );
@@ -103,14 +98,13 @@
                 float r = length(r_uv);
                 float angle = atan(r_uv.y, r_uv.x);
                 
-                // 根據 Option 3 選擇切換圖案 (Flower / Leave / Color Pattern)
                 float patternModifier = 1.0;
                 if(uPatternType > 0.5 && uPatternType < 1.5) {
-                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); // 🌸 Flower Pattern
+                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); 
                 } else if(uPatternType > 1.5) {
-                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); // 🌿 Leave Pattern
+                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); 
                 } else {
-                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); // ⭐ Color Palette Shader 預設幾何
+                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); 
                 }
                 
                 float base_d = r * patternModifier;
@@ -134,7 +128,7 @@
             }
         `;
 
-        // --- 中性自然語感：Miro 流程狀態機管理系統 ---
+        // --- 互動狀態機控制流程 ---
         let currentStep = 1;
         const htmlContent = document.getElementById('content-area');
         const cardNode = document.getElementById('dialog-card');
@@ -145,37 +139,37 @@
             
             setTimeout(() => {
                 switch(currentStep) {
-                    case 1: // Output 1
+                    case 1:
                         htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">Hello there...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 2; updateFlow(); }, 2000);
                         break;
-                    case 2: // Output 2
+                    case 2:
                         htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">How's your day going?</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 3; updateFlow(); }, 2000);
                         break;
-                    case 3: // Output 3
+                    case 3:
                         htmlContent.innerHTML = `<h2 class="text-xl text-gray-200 leading-relaxed">Take a moment to check in with yourself...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 4; updateFlow(); }, 2000);
                         break;
-                    case 4: // Option 1 (綁定腦波頻率)
+                    case 4: // Option 1：選擇狀態（此時手動點擊會解鎖瀏覽器音訊限制）
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">How are you feeling right now?</h3>
                             <div class="space-y-3">
-                                <button onclick="selectMood(10.0, 15.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Calm and relaxed</button>
-                                <button onclick="selectMood(6.0, 10.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. A bit tired or stressed</button>
-                                <button onclick="selectMood(20.0, 40.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Energized and motivated</button>
+                                <button onclick="selectMood(10.0, 15.0, 1)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Calm and relaxed</button>
+                                <button onclick="selectMood(6.0, 10.0, 2)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. A bit tired or stressed</button>
+                                <button onclick="selectMood(20.0, 40.0, 3)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Energized and motivated</button>
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 5: // Output 4
+                    case 5:
                         htmlContent.innerHTML = `<h2 class="text-xl font-medium text-gray-200">What are your plans for the rest of the day?</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 6; updateFlow(); }, 2000);
                         break;
-                    case 6: // Option 2 (綁定 Color Palette)
+                    case 6: // Option 2
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">Your next plan:</h3>
                             <div class="space-y-3">
@@ -185,7 +179,7 @@
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 7: // Option 3 (圖案：Flower / Leave / Color Shader)
+                    case 7: // Option 3
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">Pick a visual pattern that catches your eye:</h3>
                             <div class="grid grid-cols-3 gap-4">
@@ -195,27 +189,30 @@
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 8: // Output 5
+                    case 8:
                         htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
                         break;
-                    case 9: // Output 6
+                    case 9:
                         htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Here is your space. Enjoy.</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
-                        // 2秒後 UI 框完美消失，Shader 啟動並錄影
+                        // 2秒後 UI 關閉，視聽完全同步爆發
                         setTimeout(() => {
                             document.getElementById('ui-container').style.display = 'none';
                             
-                            // 將記錄下來的客製化測驗結果一併送進顯示卡
+                            // 1. 啟動視覺 Shader
                             shaderUniforms.uDeltaFreq.value = userChoices.delta;
                             shaderUniforms.uBetaFreq.value = userChoices.beta;
                             shaderUniforms.uPaletteType.value = userChoices.paletteType;
                             shaderUniforms.uPatternType.value = userChoices.patternType;
                             shaderUniforms.uStarted.value = 1.0;
                             
-                            // 呼叫右下角錄影機制
+                            // 2. 啟動聽覺音效（執行剛剛排定好的 Web Audio）
+                            if (startAudioFunctions) startAudioFunctions();
+
+                            // 3. 右下角開始默默錄影
                             document.getElementById('download-btn').style.display = 'flex';
                             startRecordingAndDownload();
                         }, 2000);
@@ -224,9 +221,129 @@
             }, 400);
         }
 
-        function selectMood(d, b) { userChoices.delta = d; userChoices.beta = b; currentStep = 5; updateFlow(); }
+        // 選擇心情時，順便在背景秘密初始化 Web Audio 公式
+        function selectMood(d, b, moodIndex) { 
+            userChoices.delta = d; 
+            userChoices.beta = b; 
+            
+            // 初始化音訊環境（必須在 click 事件內執行）
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            setupBrainwaveAudio(moodIndex);
+
+            currentStep = 5; 
+            updateFlow(); 
+        }
+        
         function selectPalette(p) { userChoices.paletteType = p; currentStep = 7; updateFlow(); }
         function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
+
+        // ========================================================
+        // 🔊 WEB AUDIO API 數位音訊合成核心引擎
+        // ========================================================
+        function setupBrainwaveAudio(moodIndex) {
+            let chord = [349.23, 440.00, 523.25]; // 預設 F Major
+            let alphaDiff = 10.0;                 // 10Hz Alpha
+            let bpm = 110;
+            let bassPattern = [87.31, 87.31, 130.81, 87.31];
+            let noiseFilterFreq = 700;
+            let noiseType = 'lowpass';
+
+            // 根據使用者選的狀態，切換不同的數學和弦、環境音與節奏速度
+            if (moodIndex === 2) { // Tired/Stressed -> 6Hz Theta + D minor 和弦 + 緩慢細雨聲
+                chord = [293.66, 349.23, 440.00]; // D Minor (憂鬱、深沉)
+                alphaDiff = 6.0;                  // 6Hz Theta 深度放鬆波
+                bpm = 70;                         // 慢速 70 BPM
+                bassPattern = [73.42, 73.42, 110.00, 73.42]; // D2 低音
+                noiseFilterFreq = 400;            // 更低沉的環境雨聲
+            } else if (moodIndex === 3) { // Energized -> 40Hz Gamma + A Major 增和弦 + 激昂風鳴聲
+                chord = [440.00, 554.37, 698.46]; // A Augmented (明亮、有未來感)
+                alphaDiff = 40.0;                 // 40Hz 高感度 Gamma 高度專注波
+                bpm = 135;                        // 快速高能量 135 BPM
+                bassPattern = [110.00, 164.81, 110.00, 220.00]; // A2 高動態低音線
+                noiseFilterFreq = 1200;           // 尖銳、流動的風聲
+                noiseType = 'bandpass';
+            }
+
+            // 封裝排程，等到最後主秀再真正播放
+            startAudioFunctions = () => {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+
+                // A. 生成客製化環境背景雜訊 (海浪 / 雨聲 / 風聲)
+                const bufferSize = 4 * audioCtx.sampleRate;
+                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) { output[i] = Math.random() * 2 - 1; }
+                
+                const noiseSource = audioCtx.createBufferSource();
+                noiseSource.buffer = noiseBuffer; noiseSource.loop = true;
+
+                const waveGain = audioCtx.createGain();
+                waveGain.gain.setValueAtTime(moodIndex === 3 ? 0.008 : 0.015, audioCtx.currentTime);
+                
+                const waveOsc = audioCtx.createOscillator();
+                waveOsc.frequency.value = moodIndex === 2 ? 0.2 : 0.1; // 雨聲起伏稍快，海浪稍慢
+                const waveGainMod = audioCtx.createGain();
+                waveGainMod.gain.value = 0.02; 
+                
+                waveOsc.connect(waveGainMod).connect(waveGain.gain);
+                waveOsc.start();
+
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = noiseType; filter.frequency.value = noiseFilterFreq;
+
+                noiseSource.connect(filter).connect(waveGain).connect(audioCtx.destination);
+                noiseSource.start();
+
+                // B. 生成雙耳節拍基礎墊音 (Binaural Beats)
+                chord.forEach(freq => {
+                    const pannerLeft = audioCtx.createStereoPanner(); pannerLeft.pan.value = -1;
+                    const pannerRight = audioCtx.createStereoPanner(); pannerRight.pan.value = 1;
+                    const gainNode = audioCtx.createGain(); gainNode.gain.value = 0.008; // 微調音量，避免刺耳
+
+                    const oscLeft = audioCtx.createOscillator(); oscLeft.type = 'sine'; oscLeft.frequency.value = freq;
+                    const oscRight = audioCtx.createOscillator(); oscRight.type = 'sine'; oscRight.frequency.value = freq + alphaDiff;
+
+                    oscLeft.connect(pannerLeft).connect(gainNode);
+                    oscRight.connect(pannerRight).connect(gainNode);
+                    gainNode.connect(audioCtx.destination);
+
+                    oscLeft.start(); oscRight.start();
+                });
+
+                // C. 客製化低音編排器 (Bassline Sequencer)
+                const noteLength = 60 / bpm;
+                let step = 0;
+
+                function scheduleBass(time) {
+                    const bassOsc = audioCtx.createOscillator();
+                    bassOsc.type = 'sine';
+                    bassOsc.frequency.value = bassPattern[step % bassPattern.length];
+
+                    const bassGain = audioCtx.createGain();
+                    bassGain.gain.setValueAtTime(0.0, time);
+                    bassGain.gain.linearRampToValueAtTime(moodIndex === 3 ? 0.22 : 0.18, time + 0.02); 
+                    bassGain.gain.exponentialRampToValueAtTime(0.001, time + noteLength * 0.9); 
+
+                    const bassFilter = audioCtx.createBiquadFilter();
+                    bassFilter.type = 'lowpass';
+                    bassFilter.frequency.value = 130;
+
+                    bassOsc.connect(bassGain).connect(bassFilter).connect(audioCtx.destination);
+                    bassOsc.start(time);
+                    bassOsc.stop(time + noteLength);
+
+                    step++;
+                    const nextNoteTime = time + noteLength;
+                    setTimeout(() => {
+                        scheduleBass(nextNoteTime);
+                    }, noteLength * 1000 - 50);
+                }
+
+                scheduleBass(audioCtx.currentTime + 0.2);
+            };
+        }
 
         // --- Three.js 初始化基礎架構 ---
         function initShader() {
@@ -249,7 +366,6 @@
             window.addEventListener('resize', onWindowResize);
             animate(0);
             
-            // 觸發狀態機
             updateFlow();
         }
 
@@ -264,7 +380,7 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
-        // --- 靜默背景 Canvas 錄影與檔案下載綁定 ---
+        // --- 錄影與檔案下載綁定 ---
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
             const stream = canvas.captureStream(30); 
@@ -286,8 +402,6 @@
                 const url = URL.createObjectURL(blob);
 
                 const downloadBtn = document.getElementById('download-btn');
-                
-                // 30秒錄影結束：變綠、解鎖滑鼠點擊、跳躍動畫
                 downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto animate-bounce";
                 downloadBtn.innerHTML = "📥 Download Your Video (30s)";
                 
@@ -304,11 +418,7 @@
             };
 
             mediaRecorder.start();
-
-            // 錄足 30 秒自動結束
-            setTimeout(() => {
-                mediaRecorder.stop();
-            }, 30000); 
+            setTimeout(() => { mediaRecorder.stop(); }, 30000); 
         }
 
         window.onload = initShader;
