@@ -38,6 +38,7 @@
         let audioCtx = null;
         let startAudioFunctions = null; 
 
+        // 保持互動參數記錄（後續可自行擴充串接）
         let userChoices = {
             delta: 2.0,
             beta: 40.0,
@@ -45,41 +46,33 @@
             patternType: 0.0   
         };
 
+        // 傳遞給 Shader 的全域參數
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uDeltaFreq: { value: 2.0 }, 
-            uBetaFreq: { value: 40.0 },
-            uPaletteType: { value: 1.0 },
-            uPatternType: { value: 0.0 },
-            uStarted: { value: 0.0 } 
+            uStarted: { value: 0.0 } // 控制主秀是否開始的開關
         };
 
+        // ========================================================
+        // 🎨 WEBGL FRAGMENT SHADER (櫻花雷射漣漪代碼已安全置入)
+        // ========================================================
         const fragmentShaderSource = `
             uniform float iTime;
             uniform vec2 iResolution;
-            uniform float uDeltaFreq;
-            uniform float uBetaFreq;
-            uniform float uPaletteType;
-            uniform float uPatternType;
-            uniform float uStarted; 
+            uniform float uStarted; // 接收網頁流程控制開關
 
-            vec3 palette( float t, float type ){ 
-                vec3 a = vec3(1.248, 0.5, 0.5);
-                vec3 b = vec3(-0.042, 0.5, 0.5);
+            vec3 palette( float t, vec3 bias ){ 
+                vec3 a = vec3(0.5, 0.5, 0.5);
+                vec3 b = vec3(0.5, 0.5, 0.5);
                 vec3 c = vec3(1.0, 1.0, 1.0);
-                vec3 d = vec3(0.0, 0.333, 0.667);
+                vec3 d = vec3(0.0, 0.1, 0.2) + bias;
                 
-                if(type > 1.5 && type < 2.5) { 
-                    a = vec3(0.8, 0.4, 0.2); b = vec3(0.2, 0.4, 0.2); c = vec3(2.0, 1.0, 1.0); d = vec3(0.0, 0.25, 0.25);
-                } else if(type > 2.5) { 
-                    a = vec3(0.2, 0.5, 0.7); b = vec3(0.4, 0.2, 0.2); c = vec3(1.0, 1.0, 1.0); d = vec3(0.0, 0.1, 0.3);
-                }
-                return a + b*cos( 6.283185*(c*t+d) );
+                return a + b * cos( 6.283185 * (c * t + d) );
             }
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
+                // 如果流程還沒走到最後，畫布保持全黑
                 if (uStarted < 0.5) {
                     fragColor = vec4(0.0, 0.0, 0.0, 1.0);
                     return;
@@ -88,37 +81,104 @@
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
+                // 【第一層：底層彩虹背景】
                 float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
-                vec3 backgroundColor = palette(bg_t, uPaletteType);
+                vec3 backgroundColor = palette(bg_t, vec3(0.0));
 
-                vec2 symmetric_uv = abs(uv_center);
-                vec2 r_uv = symmetric_uv - vec2(1.7, 1.0);
+                // 【第二層：等比例放大、絕對不變形的真實五瓣櫻花雷射漣漪】
+                vec3 rippleLayerColorSum = vec3(0.0);
+                float total_mix_weight = 0.0;
                 
-                float r = length(r_uv);
-                float angle = atan(r_uv.y, r_uv.x);
-                
-                float patternModifier = 1.0;
-                if(uPatternType > 0.5 && uPatternType < 1.5) {
-                    patternModifier = 1.0 + 0.3 * cos(angle * 5.0); 
-                } else if(uPatternType > 1.5) {
-                    patternModifier = 1.0 + 0.4 * abs(sin(angle * 2.0)) * exp(-symmetric_uv.x); 
-                } else {
-                    patternModifier = 1.0 + 0.2 * cos(angle * 4.0); 
+                // 🛠️【修改點 1：放大總循環時間，容納兩組輪流發射】
+                float totalLoop = 50.0; 
+
+                // 🔄 控制一組生成 4 朵花的 Loop 迴圈
+                for(int i = 0; i < 4; i++) {
+                    
+                    // 【時間差遞增累加邏輯】
+                    float timeInterval = 3.0;
+                    float timeOffset = float(i) * timeInterval + (float(i) * (float(i) - 1.0)) * 0.5;
+                    
+                    // 計算當前大循環下的絕對時間
+                    float rippleTime = mod(iTime - timeOffset, totalLoop);
+                    if (rippleTime < 0.0) rippleTime += totalLoop;
+                    
+                    // ✨【修改點 2：動態判定當前階段，並切換起始角落】✨
+                    vec2 startCorner;
+                    float stageTime; // 每一組內部的獨立時間軸
+                    
+                    if (rippleTime < 25.0) {
+                        // 【前半段：右上組】
+                        startCorner = vec2(1.5, 0.7);
+                        stageTime = rippleTime; 
+                    } else {
+                        // 【後半段：左上組】
+                        startCorner = vec2(-1.5, 0.7);
+                        stageTime = rippleTime - 25.0; 
+                    }
+                    
+                    // 讓波紋進度與速度乘數使用組內獨立時間
+                    float speedMultiplier = 0.8 + float(i) * 0.01;
+                    float progress = stageTime * speedMultiplier; 
+                    
+                    // 【調整位置偏移】
+                    vec2 posOffset = vec2(float(i) * 0.03 * sign(startCorner.x), float(i) * 0.015); 
+                    vec2 shiftedStart = startCorner + posOffset;
+                    
+                    vec3 colorBias = vec3(float(i) * 0.15, float(i) * 0.08, float(i) * 0.05);
+                    
+                    // 【計算對角線移動軌跡】
+                    vec2 targetCorner = -shiftedStart;
+                    float moveProgress = smoothstep(0.0, 12.0, stageTime);
+                    vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
+                    
+                    // 【根據花心在移動路徑上的「空間位置」改變大小】
+                    float centerDist = length(currentCenter);
+                    
+                    // 【讓每朵花依序遞減縮小】
+                    float instanceSize = 1.0 - float(i) * 0.2; 
+                    float flowerScale = instanceSize * mix(1.0, 0.03, smoothstep(0.0, 1.5, centerDist));
+                    
+                    // 【計算當前像素相對於「動態花心」的距離與角度】
+                    vec2 toCorner = uv_center - currentCenter;
+                    float r = length(toCorner);
+                    float angle = atan(toCorner.y, toCorner.x); 
+                    
+                    // 💡 【標準五瓣櫻花 SDF 公式】
+                    float theta5 = angle * 2.5;
+                    float flower_base = abs(sin(theta5)); 
+                    
+                    float notch = 1.0 - abs(cos(theta5));
+                    float sakuraShape = flower_base * 0.7 + notch * 0.25;
+                    
+                    float base_d = (r / flowerScale) / (0.3 + 0.5 * sakuraShape);
+                    
+                    // 解鎖外圍波紋，激發擴散流動感
+                    float theta = sin(base_d * 0.5 - progress * 1.5);
+                    float alpha = sin(base_d * 1.5 - progress * 3.5);
+                    
+                    // 發光感微調參數
+                    float theta_glow = 0.2 / (abs(theta) + 0.2);   
+                    float alpha_glow = 0.06 / (abs(alpha) + 0.06); 
+                    
+                    float layer_glow = theta_glow + alpha_glow;
+                    
+                    // 淡入淡出改由組內獨立時間控制
+                    float fadeIn = smoothstep(0.0, 1.5, stageTime);
+                    float fadeOut = 1.0 - smoothstep(12.0, 17.0, stageTime);
+                    float spaceFade = exp(-base_d * 0.2); 
+                    
+                    layer_glow *= fadeIn * fadeOut * spaceFade;
+                    
+                    vec3 thisCornerColor = palette(iTime * 0.08 + float(i) * 0.25, colorBias);
+                    rippleLayerColorSum += thisCornerColor * layer_glow;
+                    total_mix_weight += layer_glow;
                 }
-                
-                float base_d = r * patternModifier;
 
-                float delta = sin(base_d * uDeltaFreq - iTime * 1.5) * 0.3; 
-                float beta  = sin(base_d * uBetaFreq + iTime * 12.0) * 0.05; 
-                
-                float wave = abs(delta + beta);
-                float final_glow = 0.005 / (wave + 0.001);
-                final_glow *= exp(-base_d * 0.2);
+                float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.3);
+                vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
+                vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
 
-                float rippleMixControl = clamp(final_glow, 0.0, 1.0);
-                vec3 rippleColor = palette(iTime * 0.1 + 0.5, uPaletteType); 
-
-                vec3 finalColor = mix(backgroundColor, rippleColor, rippleMixControl);
                 fragColor = vec4(finalColor, 1.0);
             }
 
@@ -188,30 +248,26 @@
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 8: // Output 5: 在這個當下，音樂開始安靜地 Fade in 淡入
+                    case 8: // "A moment before the gift" 出現，音樂開始安靜地 Fade In
                         htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
-                        // 🎧 在這裡觸發音樂播放！
+                        // 🎧 觸發音訊
                         if (startAudioFunctions) startAudioFunctions();
 
                         setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
                         break;
-                    case 9: // Output 6
+                    case 9: 
                         htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Here is your space. Enjoy.</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
                         setTimeout(() => {
                             document.getElementById('ui-container').style.display = 'none';
                             
-                            // 啟動視覺 Shader
-                            shaderUniforms.uDeltaFreq.value = userChoices.delta;
-                            shaderUniforms.uBetaFreq.value = userChoices.beta;
-                            shaderUniforms.uPaletteType.value = userChoices.paletteType;
-                            shaderUniforms.uPatternType.value = userChoices.patternType;
+                            // 🎬 啟動櫻花雷射漣漪 Shader 主視覺
                             shaderUniforms.uStarted.value = 1.0;
                             
-                            // 右下角開始默默錄影
+                            // 右下角開啟 30 秒自動錄影下載
                             document.getElementById('download-btn').style.display = 'flex';
                             startRecordingAndDownload();
                         }, 2000);
@@ -235,30 +291,22 @@
         function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
 
         // ========================================================
-        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (全域音量控制版)
+        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (全選項重複基準版)
         // ========================================================
         function setupBrainwaveAudio(moodIndex) {
-            let chord = [349.23, 440.00, 523.25]; 
-            let alphaDiff = 10.0;                 
+            // 目前不論選什麼，皆採用你提供的這套相同內容作為基準
+            let chord = [349.23, 440.00, 523.25]; // F Major
+            let alphaDiff = 10.0;                 // 10Hz Alpha
             let bpm = 110;
             let bassPattern = [87.31, 87.31, 130.81, 87.31];
             let noiseFilterFreq = 700;
             let noiseType = 'lowpass';
 
-            if (moodIndex === 2) { 
-                chord = [293.66, 349.23, 440.00]; 
-                alphaDiff = 6.0;                  
-                bpm = 70;                         
-                bassPattern = [73.42, 73.42, 110.00, 73.42]; 
-                noiseFilterFreq = 400;            
-            } else if (moodIndex === 3) { 
-                chord = [440.00, 554.37, 698.46]; 
-                alphaDiff = 40.0;                 
-                bpm = 135;                        
-                bassPattern = [110.00, 164.81, 110.00, 220.00]; 
-                noiseFilterFreq = 1200;           
-                noiseType = 'bandpass';
-            }
+            /* ==========================================
+               ⚠️ 後續等待新增正確內容的區塊：
+               你可以根據 moodIndex (1, 2, 3) 
+               在此處用程式碼自行覆蓋或切換上述變數的值。
+               ========================================== */
 
             startAudioFunctions = () => {
                 if (audioCtx.state === 'suspended') {
@@ -267,16 +315,13 @@
 
                 const time = audioCtx.currentTime;
 
-                // 🎛️ 1. 建立「全域總音量控制器 (Main Gain)」
+                // 🎛️ 全域總音量控制器與 Fade In
                 const mainGain = audioCtx.createGain();
-                // 初始音量設為 0.0 (完全靜音)
                 mainGain.gain.setValueAtTime(0.0, time);
-                // 在 3.0 秒內平滑拉高到 0.35 (優雅淡入，且聲音比之前更飽滿明亮)
-                mainGain.gain.linearRampToValueAtTime(0.35, time + 8.0);
-                // 把總控制器連上喇叭
+                mainGain.gain.linearRampToValueAtTime(0.35, time + 3.0); // 3秒內優雅淡入
                 mainGain.connect(audioCtx.destination);
 
-                // A. 環境背景音 (海浪 / 雨聲 / 風聲)
+                // --- 2. 海浪聲結構 ---
                 const bufferSize = 4 * audioCtx.sampleRate;
                 const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
                 const output = noiseBuffer.getChannelData(0);
@@ -286,12 +331,12 @@
                 noiseSource.buffer = noiseBuffer; noiseSource.loop = true;
 
                 const waveGain = audioCtx.createGain();
-                waveGain.gain.setValueAtTime(moodIndex === 3 ? 0.04 : 0.08, time);
+                waveGain.gain.setValueAtTime(0.015, time);
                 
                 const waveOsc = audioCtx.createOscillator();
-                waveOsc.frequency.value = moodIndex === 2 ? 0.2 : 0.1; 
+                waveOsc.frequency.value = 0.1; 
                 const waveGainMod = audioCtx.createGain();
-                waveGainMod.gain.value = 0.05; 
+                waveGainMod.gain.value = 0.02; 
                 
                 waveOsc.connect(waveGainMod).connect(waveGain.gain);
                 waveOsc.start(time);
@@ -299,30 +344,27 @@
                 const filter = audioCtx.createBiquadFilter();
                 filter.type = noiseType; filter.frequency.value = noiseFilterFreq;
 
-                // 🔗 連接到全域 mainGain
                 noiseSource.connect(filter).connect(waveGain).connect(mainGain);
                 noiseSource.start(time);
 
-                // B. 雙耳節拍基礎墊音 (和弦)
+                // --- 3. 雙耳節拍基礎墊音結構 ---
                 chord.forEach(freq => {
                     const pannerLeft = audioCtx.createStereoPanner(); pannerLeft.pan.value = -1;
                     const pannerRight = audioCtx.createStereoPanner(); pannerRight.pan.value = 1;
                     const gainNode = audioCtx.createGain(); 
-                    gainNode.gain.value = 0.04; // 個別提升和弦音量
+                    gainNode.gain.value = 0.01; 
 
                     const oscLeft = audioCtx.createOscillator(); oscLeft.type = 'sine'; oscLeft.frequency.value = freq;
                     const oscRight = audioCtx.createOscillator(); oscRight.type = 'sine'; oscRight.frequency.value = freq + alphaDiff;
 
                     oscLeft.connect(pannerLeft).connect(gainNode);
                     oscRight.connect(pannerRight).connect(gainNode);
-                    
-                    // 🔗 連接到全域 mainGain
                     gainNode.connect(mainGain);
 
                     oscLeft.start(time); oscRight.start(time);
                 });
 
-                // C. 低音編排器 (Bassline)
+                // --- 4. 低音線結構 ---
                 const noteLength = 60 / bpm;
                 let step = 0;
 
@@ -333,14 +375,13 @@
 
                     const bassGain = audioCtx.createGain();
                     bassGain.gain.setValueAtTime(0.0, startTime);
-                    bassGain.gain.linearRampToValueAtTime(moodIndex === 3 ? 0.4 : 0.35, startTime + 0.02); 
+                    bassGain.gain.linearRampToValueAtTime(0.18, startTime + 0.02); 
                     bassGain.gain.exponentialRampToValueAtTime(0.001, startTime + noteLength * 0.9); 
 
                     const bassFilter = audioCtx.createBiquadFilter();
                     bassFilter.type = 'lowpass';
-                    bassFilter.frequency.value = 130;
+                    bassFilter.frequency.value = 150;
 
-                    // 🔗 連接到全域 mainGain
                     bassOsc.connect(bassGain).connect(bassFilter).connect(mainGain);
                     bassOsc.start(startTime);
                     bassOsc.stop(startTime + noteLength);
@@ -348,14 +389,13 @@
                     step++;
                     const nextNoteTime = startTime + noteLength;
                     setTimeout(() => {
-                        // 確保如果使用者重新整理或關閉，排程不會出錯
                         if(audioCtx && audioCtx.state !== 'closed') {
                             scheduleBass(nextNoteTime);
                         }
                     }, noteLength * 1000 - 50);
                 }
 
-                scheduleBass(time + 0.2);
+                scheduleBass(time + 0.5);
             };
         }
 
@@ -394,7 +434,7 @@
             shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
         }
 
-        // --- 錄影與檔案下載綁定 ---
+        // --- 錄影與檔案下載 ---
         function startRecordingAndDownload() {
             const canvas = document.getElementById('webgl-canvas');
             const stream = canvas.captureStream(30); 
