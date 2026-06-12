@@ -38,7 +38,6 @@
         let audioCtx = null;
         let startAudioFunctions = null; 
 
-        // 保持互動參數記錄（後續可自行擴充串接）
         let userChoices = {
             delta: 2.0,
             beta: 40.0,
@@ -46,124 +45,94 @@
             patternType: 0.0   
         };
 
-        // 傳遞給 Shader 的全域參數
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uStarted: { value: 0.0 } // 控制主秀是否開始的開關
+            uStarted: { value: 0.0 } 
         };
 
         // ========================================================
-        // 🎨 WEBGL FRAGMENT SHADER (櫻花雷射漣漪代碼已安全置入)
+        // 🎨 SHADER SOURCE 1: 五瓣櫻花雷射漣漪
         // ========================================================
-        const fragmentShaderSource = `
+        const fragmentShaderSakura = `
             uniform float iTime;
             uniform vec2 iResolution;
-            uniform float uStarted; // 接收網頁流程控制開關
+            uniform float uStarted;
 
             vec3 palette( float t, vec3 bias ){ 
                 vec3 a = vec3(0.5, 0.5, 0.5);
                 vec3 b = vec3(0.5, 0.5, 0.5);
                 vec3 c = vec3(1.0, 1.0, 1.0);
                 vec3 d = vec3(0.0, 0.1, 0.2) + bias;
-                
                 return a + b * cos( 6.283185 * (c * t + d) );
             }
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
-                // 如果流程還沒走到最後，畫布保持全黑
-                if (uStarted < 0.5) {
-                    fragColor = vec4(0.0, 0.0, 0.0, 1.0);
-                    return;
-                }
+                if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
 
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
 
-                // 【第一層：底層彩虹背景】
                 float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
                 vec3 backgroundColor = palette(bg_t, vec3(0.0));
 
-                // 【第二層：等比例放大、絕對不變形的真實五瓣櫻花雷射漣漪】
                 vec3 rippleLayerColorSum = vec3(0.0);
                 float total_mix_weight = 0.0;
-                
-                // 🛠️【修改點 1：放大總循環時間，容納兩組輪流發射】
                 float totalLoop = 50.0; 
 
-                // 🔄 控制一組生成 4 朵花的 Loop 迴圈
                 for(int i = 0; i < 4; i++) {
-                    
-                    // 【時間差遞增累加邏輯】
                     float timeInterval = 3.0;
                     float timeOffset = float(i) * timeInterval + (float(i) * (float(i) - 1.0)) * 0.5;
                     
-                    // 計算當前大循環下的絕對時間
                     float rippleTime = mod(iTime - timeOffset, totalLoop);
                     if (rippleTime < 0.0) rippleTime += totalLoop;
                     
-                    // ✨【修改點 2：動態判定當前階段，並切換起始角落】✨
                     vec2 startCorner;
-                    float stageTime; // 每一組內部的獨立時間軸
+                    float stageTime; 
                     
                     if (rippleTime < 25.0) {
-                        // 【前半段：右上組】
                         startCorner = vec2(1.5, 0.7);
                         stageTime = rippleTime; 
                     } else {
-                        // 【後半段：左上組】
                         startCorner = vec2(-1.5, 0.7);
                         stageTime = rippleTime - 25.0; 
                     }
                     
-                    // 讓波紋進度與速度乘數使用組內獨立時間
                     float speedMultiplier = 0.8 + float(i) * 0.01;
                     float progress = stageTime * speedMultiplier; 
                     
-                    // 【調整位置偏移】
                     vec2 posOffset = vec2(float(i) * 0.03 * sign(startCorner.x), float(i) * 0.015); 
                     vec2 shiftedStart = startCorner + posOffset;
                     
                     vec3 colorBias = vec3(float(i) * 0.15, float(i) * 0.08, float(i) * 0.05);
                     
-                    // 【計算對角線移動軌跡】
                     vec2 targetCorner = -shiftedStart;
                     float moveProgress = smoothstep(0.0, 12.0, stageTime);
                     vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
                     
-                    // 【根據花心在移動路徑上的「空間位置」改變大小】
                     float centerDist = length(currentCenter);
-                    
-                    // 【讓每朵花依序遞減縮小】
                     float instanceSize = 1.0 - float(i) * 0.2; 
                     float flowerScale = instanceSize * mix(1.0, 0.03, smoothstep(0.0, 1.5, centerDist));
                     
-                    // 【計算當前像素相對於「動態花心」的距離與角度】
                     vec2 toCorner = uv_center - currentCenter;
                     float r = length(toCorner);
                     float angle = atan(toCorner.y, toCorner.x); 
                     
-                    // 💡 【標準五瓣櫻花 SDF 公式】
                     float theta5 = angle * 2.5;
                     float flower_base = abs(sin(theta5)); 
-                    
                     float notch = 1.0 - abs(cos(theta5));
                     float sakuraShape = flower_base * 0.7 + notch * 0.25;
                     
                     float base_d = (r / flowerScale) / (0.3 + 0.5 * sakuraShape);
                     
-                    // 解鎖外圍波紋，激發擴散流動感
                     float theta = sin(base_d * 0.5 - progress * 1.5);
                     float alpha = sin(base_d * 1.5 - progress * 3.5);
                     
-                    // 發光感微調參數
                     float theta_glow = 0.2 / (abs(theta) + 0.2);   
                     float alpha_glow = 0.06 / (abs(alpha) + 0.06); 
-                    
                     float layer_glow = theta_glow + alpha_glow;
                     
-                    // 淡入淡出改由組內獨立時間控制
                     float fadeIn = smoothstep(0.0, 1.5, stageTime);
                     float fadeOut = 1.0 - smoothstep(12.0, 17.0, stageTime);
                     float spaceFade = exp(-base_d * 0.2); 
@@ -178,14 +147,120 @@
                 float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.3);
                 vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
                 vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
-
                 fragColor = vec4(finalColor, 1.0);
             }
-
-            void main() {
-                mainImage(gl_FragColor, gl_FragCoord.xy);
-            }
+            void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }
         `;
+
+        // ========================================================
+        // 🎨 SHADER SOURCE 2: 浮世繪捲浪
+        // ========================================================
+        const fragmentShaderWave = `
+            uniform float iTime;
+            uniform vec2 iResolution;
+            uniform float uStarted;
+
+            vec3 palette( float t, vec3 bias ){ 
+                vec3 a = vec3(0.5, 0.5, 0.5);
+                vec3 b = vec3(0.5, 0.5, 0.5);
+                vec3 c = vec3(1.0, 1.0, 1.0);
+                vec3 d = vec3(0.0, 0.1, 0.2) + bias;
+                return a + b * cos( 6.283185 * (c * t + d) );
+            }
+
+            void mainImage( out vec4 fragColor, in vec2 fragCoord )
+            {
+                if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+
+                vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
+                vec2 uv_bg = fragCoord / iResolution.xy;
+
+                float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
+                vec3 backgroundColor = palette(bg_t, vec3(0.0));
+
+                vec3 rippleLayerColorSum = vec3(0.0);
+                float total_mix_weight = 0.0;
+                float totalLoop = 50.0; 
+
+                for(int i = 0; i < 2; i++) {
+                    float timeInterval = 8.0;
+                    float timeOffset = float(i) * timeInterval + (float(i) * (float(i) - 1.0)) * 0.5;
+                    
+                    float rippleTime = mod(iTime - timeOffset, totalLoop);
+                    if (rippleTime < 0.0) rippleTime += totalLoop;
+                    
+                    vec2 startCorner;
+                    float stageTime; 
+                    
+                    if (rippleTime < 25.0) {
+                        startCorner = vec2(-1.5, -0.7); 
+                        stageTime = rippleTime; 
+                    } else {
+                        startCorner = vec2(1.5, -0.7); 
+                        stageTime = rippleTime - 25.0; 
+                    }
+                    
+                    float speedMultiplier = 0.8 + float(i) * 0.01;
+                    float progress = stageTime * speedMultiplier; 
+                    
+                    vec2 posOffset = vec2(float(i) * 0.05 * sign(startCorner.x), -float(i) * 0.03); 
+                    vec2 shiftedStart = startCorner + posOffset;
+                    
+                    vec3 colorBias = vec3(float(i) * 0.12, float(i) * 0.06, float(i) * 0.15); 
+                    
+                    vec2 targetCorner = -shiftedStart;
+                    float moveProgress = smoothstep(0.0, 12.0, stageTime);
+                    vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
+                    
+                    float centerDist = length(currentCenter);
+                    float instanceSize = 1.0 - float(i) * 0.15; 
+                    float waveScale = instanceSize * mix(1.0, 0.1, smoothstep(0.0, 1.8, centerDist));
+                    
+                    vec2 toCenter = uv_center - currentCenter;
+                    float waveDirection = -sign(startCorner.x); 
+                    
+                    float r = length(toCenter);
+                    float angle = atan(toCenter.y, toCenter.x);
+                    float twist = 1.5 / (r + 0.1); 
+                    float twistedAngle = angle + twist * waveDirection - progress * 0.5;
+
+                    float waveShape = sin(twistedAngle * 3.0); 
+                    waveShape = pow(abs(waveShape), 0.5) * sign(waveShape); 
+                    
+                    float base_d = (r / waveScale) / (0.4 + 0.4 * waveShape);
+                    
+                    float wave1 = sin(base_d * 1.0 - progress * 2.0);
+                    float wave2 = cos(base_d * 2.25 + twistedAngle * 2.0 - progress * 3.0);
+                    
+                    float wave_line1 = 0.1 / (abs(wave1) + 0.1);
+                    float wave_line2 = 0.05 / (abs(wave2) + 0.05);
+                    
+                    float layer_glow = wave_line1 * 1.2 + wave_line2 * wave_line1 * 0.8;
+                    
+                    float fadeIn = smoothstep(0.0, 1.5, stageTime);
+                    float fadeOut = 1.0 - smoothstep(12.0, 17.0, stageTime);
+                    float spaceFade = exp(-base_d * 0.15); 
+                    
+                    layer_glow *= fadeIn * fadeOut * spaceFade;
+                    
+                    vec3 thisCornerColor = palette(iTime * 0.05 + float(i) * 0.3, colorBias);
+                    rippleLayerColorSum += thisCornerColor * layer_glow;
+                    total_mix_weight += layer_glow;
+                }
+
+                float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.5);
+                vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
+                vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
+                fragColor = vec4(finalColor, 1.0);
+            }
+            void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }
+        `;
+
+        // 🗂️ 註冊 Shader 骨架地圖字典
+        const shaderRepository = {
+            'sakura': fragmentShaderSakura,
+            'wave': fragmentShaderWave
+        };
 
         // --- 互動狀態機控制流程 ---
         let currentStep = 1;
@@ -242,17 +317,16 @@
                         htmlContent.innerHTML = `
                             <h3 class="text-base font-semibold text-gray-400 mb-5">Pick a visual pattern that catches your eye:</h3>
                             <div class="grid grid-cols-3 gap-4">
-                                <button onclick="selectPattern(1.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌸</button>
-                                <button onclick="selectPattern(2.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌿</button>
-                                <button onclick="selectPattern(0.0)" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌊</button>
+                                <button onclick="selectPattern(1.0, 'sakura')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌸</button>
+                                <button onclick="selectPattern(2.0, 'sakura')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌿</button>
+                                <button onclick="selectPattern(0.0, 'wave')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌊</button>
                             </div>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         break;
-                    case 8: // "A moment before the gift" 出現，音樂開始安靜地 Fade In
+                    case 8: 
                         htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
                         cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
                         
-                        // 🎧 觸發音訊
                         if (startAudioFunctions) startAudioFunctions();
 
                         setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
@@ -264,10 +338,9 @@
                         setTimeout(() => {
                             document.getElementById('ui-container').style.display = 'none';
                             
-                            // 🎬 啟動櫻花雷射漣漪 Shader 主視覺
+                            // 🎬 啟動 Shader 畫面開關
                             shaderUniforms.uStarted.value = 1.0;
                             
-                            // 右下角開啟 30 秒自動錄影下載
                             document.getElementById('download-btn').style.display = 'flex';
                             startRecordingAndDownload();
                         }, 2000);
@@ -288,13 +361,24 @@
         }
         
         function selectPalette(p) { userChoices.paletteType = p; currentStep = 7; updateFlow(); }
-        function selectPattern(pat) { userChoices.patternType = pat; currentStep = 8; updateFlow(); }
+        
+        // 🔄 修正控制點：在此處依據按鈕綁定的 key 切換對應的 Shader
+        function selectPattern(pat, patternKey) { 
+            userChoices.patternType = pat; 
+            
+            if(material && shaderRepository[patternKey]) {
+                material.fragmentShader = shaderRepository[patternKey];
+                material.needsUpdate = true; // 強制材質更新與編譯
+            }
+
+            currentStep = 8; 
+            updateFlow(); 
+        }
 
         // ========================================================
-        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (全選項重複基準版)
+        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (重複內容版基準骨架)
         // ========================================================
         function setupBrainwaveAudio(moodIndex) {
-            // 目前不論選什麼，皆採用你提供的這套相同內容作為基準
             let chord = [349.23, 440.00, 523.25]; // F Major
             let alphaDiff = 10.0;                 // 10Hz Alpha
             let bpm = 110;
@@ -303,25 +387,22 @@
             let noiseType = 'lowpass';
 
             /* ==========================================
-               ⚠️ 後續等待新增正確內容的區塊：
+               ⚠️ 後續等待填入正確內容的區塊：
                你可以根據 moodIndex (1, 2, 3) 
                在此處用程式碼自行覆蓋或切換上述變數的值。
                ========================================== */
 
             startAudioFunctions = () => {
-                if (audioCtx.state === 'suspended') {
-                    audioCtx.resume();
-                }
+                if (audioCtx.state === 'suspended') { audioCtx.resume(); }
 
                 const time = audioCtx.currentTime;
 
-                // 🎛️ 全域總音量控制器與 Fade In
                 const mainGain = audioCtx.createGain();
                 mainGain.gain.setValueAtTime(0.0, time);
                 mainGain.gain.linearRampToValueAtTime(0.35, time + 3.0); // 3秒內優雅淡入
                 mainGain.connect(audioCtx.destination);
 
-                // --- 2. 海浪聲結構 ---
+                // 海浪聲結構
                 const bufferSize = 4 * audioCtx.sampleRate;
                 const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
                 const output = noiseBuffer.getChannelData(0);
@@ -347,7 +428,7 @@
                 noiseSource.connect(filter).connect(waveGain).connect(mainGain);
                 noiseSource.start(time);
 
-                // --- 3. 雙耳節拍基礎墊音結構 ---
+                // 雙耳節拍基礎墊音結構
                 chord.forEach(freq => {
                     const pannerLeft = audioCtx.createStereoPanner(); pannerLeft.pan.value = -1;
                     const pannerRight = audioCtx.createStereoPanner(); pannerRight.pan.value = 1;
@@ -364,7 +445,7 @@
                     oscLeft.start(time); oscRight.start(time);
                 });
 
-                // --- 4. 低音線結構 ---
+                // 低音線結構
                 const noteLength = 60 / bpm;
                 let step = 0;
 
@@ -408,9 +489,10 @@
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
+            // 預設先編譯櫻花版作為首選預載材質
             material = new THREE.ShaderMaterial({
                 uniforms: shaderUniforms,
-                fragmentShader: fragmentShaderSource
+                fragmentShader: fragmentShaderSakura
             });
 
             const geometry = new THREE.PlaneGeometry(2, 2);
