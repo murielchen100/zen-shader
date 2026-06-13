@@ -2,20 +2,21 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Zen Space - Full Integration</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zen Space</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #ui-container { position: absolute; z-index: 10; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
-        .cloud-box { transition: opacity 0.6s ease, transform 0.6s ease; }
+        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
+        .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.6s ease, transform 0.6s ease; }
+        @keyframes floatMotion { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
     </style>
 </head>
 <body>
 
     <canvas id="webgl-canvas"></canvas>
-
     <div id="ui-container">
         <div id="dialog-card" class="cloud-box bg-white/10 backdrop-blur-xl p-8 rounded-2xl max-w-md w-full text-center text-white border border-white/10 shadow-2xl mx-4">
             <div id="content-area"></div>
@@ -23,94 +24,60 @@
     </div>
 
     <script>
-        // --- 1. 全域變數與參數 ---
-        let scene, camera, renderer, material;
-        let shaderUniforms = {
-            iTime: { value: 0 },
-            iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uStarted: { value: 0.0 },
-            uDeltaFreq: { value: 6.0 },
-            uBetaFreq: { value: 10.0 }
+        // --- Shader 資源區 ---
+        const shaders = {
+            sakura: `uniform float iTime; uniform vec2 iResolution; uniform float uStarted; void mainImage(out vec4 f, vec2 c) { if(uStarted < 0.5) { f = vec4(0.0); return; } vec2 uv = (c*2.0-iResolution.xy)/iResolution.y; f = vec4(0.5+0.5*sin(iTime+uv.xyx+vec3(0,2,4)), 1.0); } void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }`,
+            wave: `uniform float iTime; uniform vec2 iResolution; uniform float uStarted; void mainImage(out vec4 f, vec2 c) { if(uStarted < 0.5) { f = vec4(0.0); return; } vec2 uv = c/iResolution.xy; f = vec4(0.2, 0.5, 0.8, 1.0) * sin(uv.x*10.0 + iTime); } void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }`,
+            leaf: `uniform float iTime; uniform vec2 iResolution; uniform float uStarted; void mainImage(out vec4 f, vec2 c) { if(uStarted < 0.5) { f = vec4(0.0); return; } vec2 uv = (c*2.0-iResolution.xy)/iResolution.y; f = vec4(0.1, 0.6, 0.2, 1.0) * cos(uv.y*5.0 + iTime); } void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }`
         };
 
-        // --- 2. Shader 資源庫 (請將完整內容貼入這些變數中) ---
-        const fragSakura = `...完整櫻花程式碼...`;
-        const fragWave = `...完整海浪程式碼...`;
-        const fragLeaf = `...完整葉子程式碼...`;
-
-        const shaderRepository = { 'sakura': fragSakura, 'wave': fragWave, 'leaf': fragLeaf };
-
-        // --- 3. UI 互動流程 (您的核心架構) ---
+        let scene, camera, renderer, material;
+        let shaderUniforms = { iTime: { value: 0 }, iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }, uStarted: { value: 0.0 } };
         let currentStep = 1;
-        const htmlContent = document.getElementById('content-area');
-        const cardNode = document.getElementById('dialog-card');
 
+        // --- 核心邏輯 ---
         function updateFlow() {
+            const htmlContent = document.getElementById('content-area');
+            const cardNode = document.getElementById('dialog-card');
             cardNode.style.opacity = '0';
             setTimeout(() => {
-                switch(currentStep) {
-                    case 1:
-                        htmlContent.innerHTML = `<h2 class="text-2xl">Hello there...</h2>`;
-                        cardNode.style.opacity = '1';
-                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000);
-                        break;
-                    case 4: // 腦波選項觸發
-                        htmlContent.innerHTML = `
-                            <h3 class="mb-5 text-gray-400">How are you feeling?</h3>
-                            <button onclick="selectMood(6.0, 10.0, 1)" class="w-full bg-white/10 p-3 mb-2 rounded-xl">Calm</button>
-                            <button onclick="selectMood(10.0, 15.0, 2)" class="w-full bg-white/10 p-3 mb-2 rounded-xl">Stressed</button>`;
-                        cardNode.style.opacity = '1';
-                        break;
-                    case 7: // 模式選擇
-                        htmlContent.innerHTML = `
-                            <h3 class="mb-5 text-gray-400">Pick your view:</h3>
-                            <div class="grid grid-cols-3 gap-4">
-                                <button onclick="selectPattern('sakura')" class="text-3xl bg-white/10 p-4 rounded-xl">🌸</button>
-                                <button onclick="selectPattern('wave')" class="text-3xl bg-white/10 p-4 rounded-xl">🌊</button>
-                                <button onclick="selectPattern('leaf')" class="text-3xl bg-white/10 p-4 rounded-xl">🌿</button>
-                            </div>`;
-                        cardNode.style.opacity = '1';
-                        break;
-                    case 9:
-                        htmlContent.innerHTML = `<h2 class="text-2xl text-green-400">Enjoy your space.</h2>`;
-                        cardNode.style.opacity = '1';
-                        setTimeout(() => { 
-                            document.getElementById('ui-container').style.display = 'none';
-                            shaderUniforms.uStarted.value = 1.0;
-                        }, 2000);
-                        break;
+                if(currentStep === 7) {
+                    htmlContent.innerHTML = `
+                        <h3 class="mb-5">Pick a pattern:</h3>
+                        <div class="grid grid-cols-3 gap-4">
+                            <button onclick="selectPattern('sakura')" class="text-3xl p-4 bg-white/10 rounded">🌸</button>
+                            <button onclick="selectPattern('leaf')" class="text-3xl p-4 bg-white/10 rounded">🌿</button>
+                            <button onclick="selectPattern('wave')" class="text-3xl p-4 bg-white/10 rounded">🌊</button>
+                        </div>`;
+                } else {
+                    htmlContent.innerHTML = `<h2 class="text-2xl">Zen Space (Step ${currentStep})</h2><button onclick="currentStep=7;updateFlow();" class="mt-4 p-2 bg-white/20 rounded">Continue</button>`;
                 }
+                cardNode.style.opacity = '1';
             }, 400);
         }
 
-        function selectMood(d, b) { 
-            shaderUniforms.uDeltaFreq.value = d; 
-            shaderUniforms.uBetaFreq.value = b;
-            currentStep = 5; updateFlow(); 
-        }
-
         function selectPattern(key) {
-            material.fragmentShader = shaderRepository[key];
+            material.fragmentShader = shaders[key];
             material.needsUpdate = true;
-            currentStep = 8; updateFlow();
+            shaderUniforms.uStarted.value = 1.0;
+            document.getElementById('ui-container').style.display = 'none';
         }
 
-        // --- 4. 初始化 ---
         function init() {
             renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas') });
             renderer.setSize(window.innerWidth, window.innerHeight);
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            material = new THREE.ShaderMaterial({ uniforms: shaderUniforms, fragmentShader: shaderRepository.sakura });
+            material = new THREE.ShaderMaterial({ uniforms: shaderUniforms, fragmentShader: shaders.sakura });
             scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            
+            function animate(t) {
+                requestAnimationFrame(animate);
+                shaderUniforms.iTime.value = t * 0.001;
+                renderer.render(scene, camera);
+            }
             animate();
             updateFlow();
-        }
-
-        function animate(t) {
-            requestAnimationFrame(animate);
-            shaderUniforms.iTime.value = t * 0.001;
-            renderer.render(scene, camera);
         }
 
         window.onload = init;
