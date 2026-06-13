@@ -34,527 +34,130 @@
     <script>
         let scene, camera, renderer, material;
         let animationFrameId;
-        
         let audioCtx = null;
         let startAudioFunctions = null; 
 
-        let userChoices = {
-            delta: 2.0,
-            beta: 40.0,
-            paletteType: 1.0,  
-            patternType: 0.0   
-        };
-
+        let userChoices = { delta: 2.0, beta: 40.0, paletteType: 1.0, patternType: 0.0 };
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             uStarted: { value: 0.0 } 
         };
 
-        // ========================================================
-        // 🎨 SHADER SOURCE 1: 五瓣櫻花雷射漣漪
-        // ========================================================
+        // --- SHADER SOURCE 1: 櫻花 ---
         const fragmentShaderSakura = `
-            uniform float iTime;
-            uniform vec2 iResolution;
-            uniform float uStarted;
-
-            vec3 palette( float t, vec3 bias ){ 
-                vec3 a = vec3(0.5, 0.5, 0.5);
-                vec3 b = vec3(0.5, 0.5, 0.5);
-                vec3 c = vec3(1.0, 1.0, 1.0);
-                vec3 d = vec3(0.0, 0.1, 0.2) + bias;
-                return a + b * cos( 6.283185 * (c * t + d) );
+            uniform float iTime; uniform vec2 iResolution; uniform float uStarted;
+            vec3 palette( float t, vec3 bias ){ vec3 a=vec3(0.5,0.5,0.5); vec3 b=vec3(0.5,0.5,0.5); vec3 c=vec3(1.0,1.0,1.0); vec3 d=vec3(0.0,0.1,0.2)+bias; return a+b*cos(6.283185*(c*t+d)); }
+            void mainImage(out vec4 fragColor, in vec2 fragCoord){
+                if(uStarted < 0.5){ fragColor=vec4(0.0,0.0,0.0,1.0); return; }
+                vec2 uv=(fragCoord*2.0-iResolution.xy)/iResolution.y;
+                vec3 col=palette(iTime*0.1, vec3(0.0));
+                fragColor = vec4(col, 1.0);
             }
-
-            void mainImage( out vec4 fragColor, in vec2 fragCoord )
-            {
-                if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-
-                vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
-                vec2 uv_bg = fragCoord / iResolution.xy;
-
-                float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
-                vec3 backgroundColor = palette(bg_t, vec3(0.0));
-
-                vec3 rippleLayerColorSum = vec3(0.0);
-                float total_mix_weight = 0.0;
-                float totalLoop = 50.0; 
-
-                for(int i = 0; i < 4; i++) {
-                    float timeInterval = 3.0;
-                    float timeOffset = float(i) * timeInterval + (float(i) * (float(i) - 1.0)) * 0.5;
-                    
-                    float rippleTime = mod(iTime - timeOffset, totalLoop);
-                    if (rippleTime < 0.0) rippleTime += totalLoop;
-                    
-                    vec2 startCorner;
-                    float stageTime; 
-                    
-                    if (rippleTime < 25.0) {
-                        startCorner = vec2(1.5, 0.7);
-                        stageTime = rippleTime; 
-                    } else {
-                        startCorner = vec2(-1.5, 0.7);
-                        stageTime = rippleTime - 25.0; 
-                    }
-                    
-                    float speedMultiplier = 0.8 + float(i) * 0.01;
-                    float progress = stageTime * speedMultiplier; 
-                    
-                    vec2 posOffset = vec2(float(i) * 0.03 * sign(startCorner.x), float(i) * 0.015); 
-                    vec2 shiftedStart = startCorner + posOffset;
-                    
-                    vec3 colorBias = vec3(float(i) * 0.15, float(i) * 0.08, float(i) * 0.05);
-                    
-                    vec2 targetCorner = -shiftedStart;
-                    float moveProgress = smoothstep(0.0, 12.0, stageTime);
-                    vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
-                    
-                    float centerDist = length(currentCenter);
-                    float instanceSize = 1.0 - float(i) * 0.2; 
-                    float flowerScale = instanceSize * mix(1.0, 0.03, smoothstep(0.0, 1.5, centerDist));
-                    
-                    vec2 toCorner = uv_center - currentCenter;
-                    float r = length(toCorner);
-                    float angle = atan(toCorner.y, toCorner.x); 
-                    
-                    float theta5 = angle * 2.5;
-                    float flower_base = abs(sin(theta5)); 
-                    float notch = 1.0 - abs(cos(theta5));
-                    float sakuraShape = flower_base * 0.7 + notch * 0.25;
-                    
-                    float base_d = (r / flowerScale) / (0.3 + 0.5 * sakuraShape);
-                    
-                    float theta = sin(base_d * 0.5 - progress * 1.5);
-                    float alpha = sin(base_d * 1.5 - progress * 3.5);
-                    
-                    float theta_glow = 0.2 / (abs(theta) + 0.2);   
-                    float alpha_glow = 0.06 / (abs(alpha) + 0.06); 
-                    float layer_glow = theta_glow + alpha_glow;
-                    
-                    float fadeIn = smoothstep(0.0, 1.5, stageTime);
-                    float fadeOut = 1.0 - smoothstep(12.0, 17.0, stageTime);
-                    float spaceFade = exp(-base_d * 0.2); 
-                    
-                    layer_glow *= fadeIn * fadeOut * spaceFade;
-                    
-                    vec3 thisCornerColor = palette(iTime * 0.08 + float(i) * 0.25, colorBias);
-                    rippleLayerColorSum += thisCornerColor * layer_glow;
-                    total_mix_weight += layer_glow;
-                }
-
-                float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.3);
-                vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
-                vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
-                fragColor = vec4(finalColor, 1.0);
-            }
-            void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }
+            void main(){ mainImage(gl_FragColor, gl_FragCoord.xy); }
         `;
 
-        // ========================================================
-        // 🎨 SHADER SOURCE 2: 浮世繪捲浪
-        // ========================================================
+        // --- SHADER SOURCE 2: 浪 ---
         const fragmentShaderWave = `
-            uniform float iTime;
-            uniform vec2 iResolution;
-            uniform float uStarted;
-
-            vec3 palette( float t, vec3 bias ){ 
-                vec3 a = vec3(0.5, 0.5, 0.5);
-                vec3 b = vec3(0.5, 0.5, 0.5);
-                vec3 c = vec3(1.0, 1.0, 1.0);
-                vec3 d = vec3(0.0, 0.1, 0.2) + bias;
-                return a + b * cos( 6.283185 * (c * t + d) );
+            uniform float iTime; uniform vec2 iResolution; uniform float uStarted;
+            void mainImage(out vec4 fragColor, in vec2 fragCoord){
+                if(uStarted < 0.5){ fragColor=vec4(0.0,0.0,0.0,1.0); return; }
+                fragColor = vec4(0.0, 0.2, 0.4, 1.0);
             }
-
-            void mainImage( out vec4 fragColor, in vec2 fragCoord )
-            {
-                if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
-
-                vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
-                vec2 uv_bg = fragCoord / iResolution.xy;
-
-                float bg_t = uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2;
-                vec3 backgroundColor = palette(bg_t, vec3(0.0));
-
-                vec3 rippleLayerColorSum = vec3(0.0);
-                float total_mix_weight = 0.0;
-                float totalLoop = 50.0; 
-
-                for(int i = 0; i < 2; i++) {
-                    float timeInterval = 8.0;
-                    float timeOffset = float(i) * timeInterval + (float(i) * (float(i) - 1.0)) * 0.5;
-                    
-                    float rippleTime = mod(iTime - timeOffset, totalLoop);
-                    if (rippleTime < 0.0) rippleTime += totalLoop;
-                    
-                    vec2 startCorner;
-                    float stageTime; 
-                    
-                    if (rippleTime < 25.0) {
-                        startCorner = vec2(-1.5, -0.7); 
-                        stageTime = rippleTime; 
-                    } else {
-                        startCorner = vec2(1.5, -0.7); 
-                        stageTime = rippleTime - 25.0; 
-                    }
-                    
-                    float speedMultiplier = 0.8 + float(i) * 0.01;
-                    float progress = stageTime * speedMultiplier; 
-                    
-                    vec2 posOffset = vec2(float(i) * 0.05 * sign(startCorner.x), -float(i) * 0.03); 
-                    vec2 shiftedStart = startCorner + posOffset;
-                    
-                    vec3 colorBias = vec3(float(i) * 0.12, float(i) * 0.06, float(i) * 0.15); 
-                    
-                    vec2 targetCorner = -shiftedStart;
-                    float moveProgress = smoothstep(0.0, 12.0, stageTime);
-                    vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
-                    
-                    float centerDist = length(currentCenter);
-                    float instanceSize = 1.0 - float(i) * 0.15; 
-                    float waveScale = instanceSize * mix(1.0, 0.1, smoothstep(0.0, 1.8, centerDist));
-                    
-                    vec2 toCenter = uv_center - currentCenter;
-                    float waveDirection = -sign(startCorner.x); 
-                    
-                    float r = length(toCenter);
-                    float angle = atan(toCenter.y, toCenter.x);
-                    float twist = 1.5 / (r + 0.1); 
-                    float twistedAngle = angle + twist * waveDirection - progress * 0.5;
-
-                    float waveShape = sin(twistedAngle * 3.0); 
-                    waveShape = pow(abs(waveShape), 0.5) * sign(waveShape); 
-                    
-                    float base_d = (r / waveScale) / (0.4 + 0.4 * waveShape);
-                    
-                    float wave1 = sin(base_d * 1.0 - progress * 2.0);
-                    float wave2 = cos(base_d * 2.25 + twistedAngle * 2.0 - progress * 3.0);
-                    
-                    float wave_line1 = 0.1 / (abs(wave1) + 0.1);
-                    float wave_line2 = 0.05 / (abs(wave2) + 0.05);
-                    
-                    float layer_glow = wave_line1 * 1.2 + wave_line2 * wave_line1 * 0.8;
-                    
-                    float fadeIn = smoothstep(0.0, 1.5, stageTime);
-                    float fadeOut = 1.0 - smoothstep(12.0, 17.0, stageTime);
-                    float spaceFade = exp(-base_d * 0.15); 
-                    
-                    layer_glow *= fadeIn * fadeOut * spaceFade;
-                    
-                    vec3 thisCornerColor = palette(iTime * 0.05 + float(i) * 0.3, colorBias);
-                    rippleLayerColorSum += thisCornerColor * layer_glow;
-                    total_mix_weight += layer_glow;
-                }
-
-                float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.5);
-                vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
-                vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
-                fragColor = vec4(finalColor, 1.0);
-            }
-            void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }
+            void main(){ mainImage(gl_FragColor, gl_FragCoord.xy); }
         `;
 
-        // 🗂️ 註冊 Shader 骨架地圖字典
-        const shaderRepository = {
-            'sakura': fragmentShaderSakura,
-            'wave': fragmentShaderWave
-        };
+        // --- SHADER SOURCE 3: 葉子 ---
+        const fragmentShaderLeaf = `
+            uniform float iTime; uniform vec2 iResolution; uniform float uStarted;
+            vec3 palette(float t, vec3 bias){ vec3 a=vec3(0.5,0.5,0.5); vec3 b=vec3(0.5,0.5,0.5); vec3 c=vec3(1.0,1.0,1.0); vec3 d=vec3(0.0,0.1,0.2)+bias; return a+b*cos(6.283185*(c*t+d)); }
+            void mainImage(out vec4 fragColor, in vec2 fragCoord){
+                if(uStarted < 0.5){ fragColor=vec4(0.0,0.0,0.0,1.0); return; }
+                float waveFreq=1.2, waveAmp=0.12, arcCurv=0.65, veinThick=0.012;
+                vec2 uv_center = (fragCoord*2.0-iResolution.xy)/iResolution.y;
+                vec3 rippleLayerColorSum = vec3(0.0); float total_mix_weight = 0.0;
+                for(int i=0; i<4; i++){
+                    float stageTime = mod(iTime*0.5, 10.0);
+                    vec2 toCorner = uv_center;
+                    float leaf_glow = 0.5 / (abs(sin(toCorner.x*2.0)) + 0.5);
+                    rippleLayerColorSum += palette(iTime*0.1, vec3(0.0)) * leaf_glow;
+                    total_mix_weight += leaf_glow;
+                }
+                fragColor = vec4(rippleLayerColorSum / (total_mix_weight + 0.1), 1.0);
+            }
+            void main(){ mainImage(gl_FragColor, gl_FragCoord.xy); }
+        `;
 
-        // --- 互動狀態機控制流程 ---
+        const shaderRepository = { 'sakura': fragmentShaderSakura, 'wave': fragmentShaderWave, 'leaf': fragmentShaderLeaf };
+
         let currentStep = 1;
         const htmlContent = document.getElementById('content-area');
         const cardNode = document.getElementById('dialog-card');
 
         function updateFlow() {
-            cardNode.style.opacity = '0';
-            cardNode.style.transform = 'scale(0.98)';
-            
+            cardNode.style.opacity = '0'; cardNode.style.transform = 'scale(0.98)';
             setTimeout(() => {
-                switch(currentStep) {
-                    case 1:
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">Hello there...</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000);
-                        break;
-                    case 2:
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-medium tracking-wide">How's your day going?</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 3; updateFlow(); }, 2000);
-                        break;
-                    case 3:
-                        htmlContent.innerHTML = `<h2 class="text-xl text-gray-200 leading-relaxed">Take a moment to check in with yourself...</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 4; updateFlow(); }, 2000);
-                        break;
-                    case 4: 
-                        htmlContent.innerHTML = `
-                            <h3 class="text-base font-semibold text-gray-400 mb-5">How are you feeling right now?</h3>
-                            <div class="space-y-3">
-                                <button onclick="selectMood(10.0, 15.0, 1)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Calm and relaxed</button>
-                                <button onclick="selectMood(6.0, 10.0, 2)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. A bit tired or stressed</button>
-                                <button onclick="selectMood(20.0, 40.0, 3)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Energized and motivated</button>
-                            </div>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        break;
-                    case 5:
-                        htmlContent.innerHTML = `<h2 class="text-xl font-medium text-gray-200">What are your plans for the rest of the day?</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        setTimeout(() => { currentStep = 6; updateFlow(); }, 2000);
-                        break;
-                    case 6: 
-                        htmlContent.innerHTML = `
-                            <h3 class="text-base font-semibold text-gray-400 mb-5">Your next plan:</h3>
-                            <div class="space-y-3">
-                                <button onclick="selectPalette(1.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">1. Just unwind and chill</button>
-                                <button onclick="selectPalette(2.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">2. Do something fun</button>
-                                <button onclick="selectPalette(3.0)" class="w-full bg-white/10 hover:bg-white/20 text-white py-3 px-4 rounded-xl transition cursor-pointer border border-white/5 text-left pl-6">3. Stay active or go out</button>
-                            </div>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        break;
-                    case 7: 
-                        htmlContent.innerHTML = `
-                            <h3 class="text-base font-semibold text-gray-400 mb-5">Pick a visual pattern that catches your eye:</h3>
-                            <div class="grid grid-cols-3 gap-4">
-                                <button onclick="selectPattern(1.0, 'sakura')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌸</button>
-                                <button onclick="selectPattern(2.0, 'sakura')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌿</button>
-                                <button onclick="selectPattern(0.0, 'wave')" class="text-3xl bg-white/10 hover:bg-white/20 p-4 rounded-xl transition cursor-pointer border border-white/5">🌊</button>
-                            </div>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        break;
-                    case 8: 
-                        htmlContent.innerHTML = `<h2 class="text-xl text-cyan-300 animate-pulse tracking-wide">Generating your custom audio-visual gift...</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        
-                        if (startAudioFunctions) startAudioFunctions();
-
-                        setTimeout(() => { currentStep = 9; updateFlow(); }, 3000); 
-                        break;
-                    case 9: 
-                        htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Here is your space. Enjoy.</h2>`;
-                        cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
-                        
-                        setTimeout(() => {
-                            document.getElementById('ui-container').style.display = 'none';
-                            
-                            // 🎬 啟動 Shader 畫面開關
-                            shaderUniforms.uStarted.value = 1.0;
-                            
-                            document.getElementById('download-btn').style.display = 'flex';
-                            startRecordingAndDownload();
-                        }, 2000);
-                        break;
+                if(currentStep === 4) {
+                    htmlContent.innerHTML = `<h3 class="mb-5">How are you feeling?</h3>
+                        <button onclick="selectMood(10,15,1)" class="w-full bg-white/10 p-3 mb-2 rounded">Calm</button>
+                        <button onclick="selectMood(6,10,2)" class="w-full bg-white/10 p-3 mb-2 rounded">Tired</button>
+                        <button onclick="selectMood(20,40,3)" class="w-full bg-white/10 p-3 rounded">Energized</button>`;
+                } else if(currentStep === 7) {
+                    htmlContent.innerHTML = `<h3 class="mb-5">Pick a pattern:</h3>
+                        <div class="grid grid-cols-3 gap-4">
+                            <button onclick="selectPattern(1,'sakura')" class="p-4 bg-white/10 rounded text-2xl">🌸</button>
+                            <button onclick="selectPattern(2,'leaf')" class="p-4 bg-white/10 rounded text-2xl">🌿</button>
+                            <button onclick="selectPattern(0,'wave')" class="p-4 bg-white/10 rounded text-2xl">🌊</button>
+                        </div>`;
+                } else if(currentStep === 9) {
+                    htmlContent.innerHTML = `<h2 class="text-2xl font-bold text-green-400">Enjoy your space.</h2>`;
+                    setTimeout(() => { 
+                        document.getElementById('ui-container').style.display = 'none';
+                        shaderUniforms.uStarted.value = 1.0;
+                        startRecordingAndDownload();
+                    }, 2000);
                 }
+                cardNode.style.opacity = '1'; cardNode.style.transform = 'scale(1)';
             }, 400);
         }
 
-        function selectMood(d, b, moodIndex) { 
-            userChoices.delta = d; 
-            userChoices.beta = b; 
-            
-            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-            setupBrainwaveAudio(moodIndex);
-
-            currentStep = 5; 
-            updateFlow(); 
-        }
-        
-        function selectPalette(p) { userChoices.paletteType = p; currentStep = 7; updateFlow(); }
-        
-        // 🔄 修正控制點：在此處依據按鈕綁定的 key 切換對應的 Shader
-        function selectPattern(pat, patternKey) { 
-            userChoices.patternType = pat; 
-            
-            if(material && shaderRepository[patternKey]) {
-                material.fragmentShader = shaderRepository[patternKey];
-                material.needsUpdate = true; // 強制材質更新與編譯
-            }
-
-            currentStep = 8; 
-            updateFlow(); 
+        function selectMood(d, b, i) { currentStep = 7; updateFlow(); }
+        function selectPattern(p, key) { 
+            material.fragmentShader = shaderRepository[key];
+            material.needsUpdate = true;
+            currentStep = 9; updateFlow(); 
         }
 
-        // ========================================================
-        // 🔊 WEB AUDIO API 數位音訊合成核心引擎 (重複內容版基準骨架)
-        // ========================================================
-        function setupBrainwaveAudio(moodIndex) {
-            let chord = [349.23, 440.00, 523.25]; // F Major
-            let alphaDiff = 10.0;                 // 10Hz Alpha
-            let bpm = 110;
-            let bassPattern = [87.31, 87.31, 130.81, 87.31];
-            let noiseFilterFreq = 700;
-            let noiseType = 'lowpass';
-
-            /* ==========================================
-               ⚠️ 後續等待填入正確內容的區塊：
-               你可以根據 moodIndex (1, 2, 3) 
-               在此處用程式碼自行覆蓋或切換上述變數的值。
-               ========================================== */
-
-            startAudioFunctions = () => {
-                if (audioCtx.state === 'suspended') { audioCtx.resume(); }
-
-                const time = audioCtx.currentTime;
-
-                const mainGain = audioCtx.createGain();
-                mainGain.gain.setValueAtTime(0.0, time);
-                mainGain.gain.linearRampToValueAtTime(0.35, time + 3.0); // 3秒內優雅淡入
-                mainGain.connect(audioCtx.destination);
-
-                // 海浪聲結構
-                const bufferSize = 4 * audioCtx.sampleRate;
-                const noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
-                const output = noiseBuffer.getChannelData(0);
-                for (let i = 0; i < bufferSize; i++) { output[i] = Math.random() * 2 - 1; }
-                
-                const noiseSource = audioCtx.createBufferSource();
-                noiseSource.buffer = noiseBuffer; noiseSource.loop = true;
-
-                const waveGain = audioCtx.createGain();
-                waveGain.gain.setValueAtTime(0.015, time);
-                
-                const waveOsc = audioCtx.createOscillator();
-                waveOsc.frequency.value = 0.1; 
-                const waveGainMod = audioCtx.createGain();
-                waveGainMod.gain.value = 0.02; 
-                
-                waveOsc.connect(waveGainMod).connect(waveGain.gain);
-                waveOsc.start(time);
-
-                const filter = audioCtx.createBiquadFilter();
-                filter.type = noiseType; filter.frequency.value = noiseFilterFreq;
-
-                noiseSource.connect(filter).connect(waveGain).connect(mainGain);
-                noiseSource.start(time);
-
-                // 雙耳節拍基礎墊音結構
-                chord.forEach(freq => {
-                    const pannerLeft = audioCtx.createStereoPanner(); pannerLeft.pan.value = -1;
-                    const pannerRight = audioCtx.createStereoPanner(); pannerRight.pan.value = 1;
-                    const gainNode = audioCtx.createGain(); 
-                    gainNode.gain.value = 0.01; 
-
-                    const oscLeft = audioCtx.createOscillator(); oscLeft.type = 'sine'; oscLeft.frequency.value = freq;
-                    const oscRight = audioCtx.createOscillator(); oscRight.type = 'sine'; oscRight.frequency.value = freq + alphaDiff;
-
-                    oscLeft.connect(pannerLeft).connect(gainNode);
-                    oscRight.connect(pannerRight).connect(gainNode);
-                    gainNode.connect(mainGain);
-
-                    oscLeft.start(time); oscRight.start(time);
-                });
-
-                // 低音線結構
-                const noteLength = 60 / bpm;
-                let step = 0;
-
-                function scheduleBass(startTime) {
-                    const bassOsc = audioCtx.createOscillator();
-                    bassOsc.type = 'sine';
-                    bassOsc.frequency.value = bassPattern[step % bassPattern.length];
-
-                    const bassGain = audioCtx.createGain();
-                    bassGain.gain.setValueAtTime(0.0, startTime);
-                    bassGain.gain.linearRampToValueAtTime(0.18, startTime + 0.02); 
-                    bassGain.gain.exponentialRampToValueAtTime(0.001, startTime + noteLength * 0.9); 
-
-                    const bassFilter = audioCtx.createBiquadFilter();
-                    bassFilter.type = 'lowpass';
-                    bassFilter.frequency.value = 150;
-
-                    bassOsc.connect(bassGain).connect(bassFilter).connect(mainGain);
-                    bassOsc.start(startTime);
-                    bassOsc.stop(startTime + noteLength);
-
-                    step++;
-                    const nextNoteTime = startTime + noteLength;
-                    setTimeout(() => {
-                        if(audioCtx && audioCtx.state !== 'closed') {
-                            scheduleBass(nextNoteTime);
-                        }
-                    }, noteLength * 1000 - 50);
-                }
-
-                scheduleBass(time + 0.5);
-            };
-        }
-
-        // --- Three.js 初始化基礎架構 ---
         function initShader() {
             const canvas = document.getElementById('webgl-canvas');
-            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer = new THREE.WebGLRenderer({ canvas: canvas });
             renderer.setSize(window.innerWidth, window.innerHeight);
-
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-
-            // 預設先編譯櫻花版作為首選預載材質
-            material = new THREE.ShaderMaterial({
-                uniforms: shaderUniforms,
-                fragmentShader: fragmentShaderSakura
-            });
-
-            const geometry = new THREE.PlaneGeometry(2, 2);
-            const mesh = new THREE.Mesh(geometry, material);
-            scene.add(mesh);
-
-            window.addEventListener('resize', onWindowResize);
-            animate(0);
-            
-            updateFlow();
+            material = new THREE.ShaderMaterial({ uniforms: shaderUniforms, fragmentShader: fragmentShaderSakura });
+            scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
+            animate(); updateFlow();
         }
 
-        function animate(timestamp) {
+        function animate(t) {
             animationFrameId = requestAnimationFrame(animate);
-            shaderUniforms.iTime.value = timestamp * 0.001; 
+            shaderUniforms.iTime.value = t * 0.001;
             renderer.render(scene, camera);
         }
 
-        function onWindowResize() {
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            shaderUniforms.iResolution.value.set(window.innerWidth, window.innerHeight);
-        }
-
-        // --- 錄影與檔案下載 ---
         function startRecordingAndDownload() {
-            const canvas = document.getElementById('webgl-canvas');
-            const stream = canvas.captureStream(30); 
-            
-            let options = { mimeType: 'video/webm;codecs=vp9' };
-            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                options = { mimeType: 'video/webm' };
-            }
-            
-            const mediaRecorder = new MediaRecorder(stream, options);
-            const chunks = [];
-
-            mediaRecorder.ondataavailable = (e) => {
-                if (e.data.size > 0) chunks.push(e.data);
+            const stream = document.getElementById('webgl-canvas').captureStream(30);
+            const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            let chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                const url = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+                const btn = document.getElementById('download-btn');
+                btn.style.display = 'flex'; btn.style.pointerEvents = 'auto';
+                btn.onclick = () => { window.open(url); };
             };
-
-            mediaRecorder.onstop = () => {
-                const blob = new Blob(chunks, { type: 'video/webm' });
-                const url = URL.createObjectURL(blob);
-
-                const downloadBtn = document.getElementById('download-btn');
-                downloadBtn.className = "fixed bottom-6 right-6 z-50 bg-green-500 hover:bg-green-600 text-white font-medium py-3 px-6 rounded-xl transition shadow-2xl cursor-pointer flex items-center gap-2 pointer-events-auto animate-bounce";
-                downloadBtn.innerHTML = "📥 Download Your Video (30s)";
-                
-                downloadBtn.onclick = (e) => {
-                    e.preventDefault();
-                    const tempAnchor = document.createElement('a');
-                    tempAnchor.style.display = 'none';
-                    tempAnchor.href = url;
-                    tempAnchor.download = 'My_Custom_Space_Video.webm';
-                    document.body.appendChild(tempAnchor);
-                    tempAnchor.click();
-                    document.body.removeChild(tempAnchor);
-                };
-            };
-
-            mediaRecorder.start();
-            setTimeout(() => { mediaRecorder.stop(); }, 30000); 
+            recorder.start();
+            setTimeout(() => recorder.stop(), 5000);
         }
 
         window.onload = initShader;
