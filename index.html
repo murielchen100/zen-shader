@@ -10,6 +10,7 @@
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
         #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
+        /* 雲朵般浮動的卡片動畫 */
         .cloud-box { animation: floatMotion 4s ease-in-out infinite; transition: opacity 0.6s ease, transform 0.6s ease; }
         @keyframes floatMotion {
             0%, 100% { transform: translateY(0px); }
@@ -35,9 +36,7 @@
         let scene, camera, renderer, material;
         let animationFrameId;
         
-        let audioCtx = null;
-        let startAudioFunctions = null; 
-
+        // 記錄使用者選擇的參數骨架
         let userChoices = {
             delta: 2.0,
             beta: 40.0,
@@ -45,10 +44,11 @@
             patternType: 0.0   
         };
 
+        // Shader 所需的 Uniforms (時間, 解析度, 啟動開關)
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-            uStarted: { value: 0.0 } 
+            uStarted: { value: 0.0 } // 預設為 0 (黑屏)
         };
 
         // ========================================================
@@ -69,6 +69,7 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
+                // 時序控制：未啟動前黑屏
                 if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
 
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
@@ -170,6 +171,7 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
+                // 時序控制：未啟動前黑屏
                 if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
 
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
@@ -274,97 +276,112 @@
 
             void mainImage( out vec4 fragColor, in vec2 fragCoord )
             {
+                // ✨ 時序控制：未啟動前黑屏
                 if (uStarted < 0.5) { fragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+
+                // --- 葉脈微調區 (已調低 waveFreq) ---
+                float waveFreq  = 1.2;    float waveAmp   = 0.12;
+                float arcCurv   = 0.65;   float veinThick = 0.012;
+                
+                // --- 橢圓波紋微調區 ---
+                float ellipScale  = 0.08; 
+                float ellipRatioX = 30.0;
+                float ellipRatioY = 40.0; 
+                float ellipThick1 = 0.03;  
+                float ellipThick2 = 0.015; 
+                float sharpen     = 3.5;   
+                float colorDelay  = 0.5;   
+                // -----------------
 
                 vec2 uv_center = (fragCoord * 2.0 - iResolution.xy) / iResolution.y;
                 vec2 uv_bg = fragCoord / iResolution.xy;
-
-                // 綠色草本背景基底色調
-                float bg_t = uv_bg.x * 0.08 + uv_bg.y * 0.12 + iTime * 0.15;
-                vec3 backgroundColor = palette(bg_t, vec3(-0.2, 0.1, -0.2));
+                vec3 backgroundColor = palette(uv_bg.x * 0.1 + uv_bg.y * 0.1 + iTime * 0.2, vec3(0.0));
 
                 vec3 rippleLayerColorSum = vec3(0.0);
                 float total_mix_weight = 0.0;
                 float totalLoop = 50.0; 
+                float hz6  = iTime * 0.3; 
+                float hz10 = iTime * 0.5;
+                float angle_radians = atan(5.0 / 9.0); 
+                float ext_cos = cos(angle_radians);
+                float ext_sin = sin(angle_radians);
 
-                for(int i = 0; i < 3; i++) {
-                    float timeInterval = 4.5;
-                    float timeOffset = float(i) * timeInterval;
-                    
+                for(int i = 0; i < 4; i++) {
+                    float timeOffset = float(i) * 3.0 + (float(i) * (float(i) - 1.0)) * 0.5;
                     float rippleTime = mod(iTime - timeOffset, totalLoop);
                     if (rippleTime < 0.0) rippleTime += totalLoop;
                     
-                    vec2 startCorner;
+                    vec2 startCorner, center1, center2;
                     float stageTime; 
                     
                     if (rippleTime < 25.0) {
-                        startCorner = vec2(0.0, 1.3); // 由上往下生長
+                        startCorner = vec2(1.5, 0.7);
+                        center1 = vec2(1.5, -1.3);
+                        center2 = vec2(-1.5, 1.3);
                         stageTime = rippleTime; 
                     } else {
-                        startCorner = vec2(0.0, -1.3); // 由下往上生長
+                        startCorner = vec2(-1.5, 0.7);
+                        center1 = vec2(-1.5, -1.3);
+                        center2 = vec2(1.5, 1.3);
                         stageTime = rippleTime - 25.0; 
                     }
                     
-                    float speedMultiplier = 0.9 + float(i) * 0.02;
-                    float progress = stageTime * speedMultiplier; 
+                    // --- 葉脈局部場 (已調整紋理頻率) ---
+                    vec2 targetCorner = -startCorner;
+                    vec2 currentCenter = mix(startCorner, targetCorner, smoothstep(0.0, 12.0, stageTime));
+                    float leafScale = (1.0 - float(i) * 0.2) * sin(clamp(stageTime / 14.0, 0.0, 1.0) * 3.14159);
+                    vec2 toCorner = uv_center - currentCenter;
+                    float moveAngle = atan(targetCorner.y - startCorner.y, targetCorner.x - startCorner.x);
+                    vec2 leaf_uv = vec2(toCorner.x * cos(moveAngle) + toCorner.y * sin(moveAngle), -toCorner.x * sin(moveAngle) + toCorner.y * cos(moveAngle));
                     
-                    vec2 posOffset = vec2(sin(iTime * 0.5 + float(i)) * 0.1, float(i) * 0.02 * sign(startCorner.y)); 
-                    vec2 shiftedStart = startCorner + posOffset;
+                    leaf_uv.y += sin(leaf_uv.x * waveFreq) * waveAmp * leafScale;
+                    float v_arc = (leaf_uv.x - sqrt(abs(leaf_uv.y)) * arcCurv) / leafScale;
                     
-                    // 偏向植物與森林的亮綠、黃綠色偏置
-                    vec3 colorBias = vec3(-0.25, 0.25, -0.15) + float(i) * vec3(-0.05, 0.05, -0.02);
+                    // 💡 調整 1.5 -> 1.0 與 4.0 -> 2.5 來減少紋理數量
+                    float leaf_glow = (0.6 / (abs(sin(v_arc * 1.0 - hz6)) + 0.4) * 0.3 + 
+                                       0.25 / (abs(sin(v_arc * 2.5 - hz10)) + 0.15) * 0.4);
+                    leaf_glow += (veinThick / (abs(leaf_uv.y / leafScale) + veinThick)) * smoothstep(1.0, 0.0, leaf_uv.x / leafScale);
                     
-                    vec2 targetCorner = -shiftedStart;
-                    float moveProgress = smoothstep(0.0, 14.0, stageTime);
-                    vec2 currentCenter = mix(shiftedStart, targetCorner, moveProgress);
-                    
-                    float centerDist = length(currentCenter);
-                    float instanceSize = 1.1 - float(i) * 0.25; 
-                    float leafScale = instanceSize * mix(1.0, 0.1, smoothstep(0.0, 1.6, centerDist));
-                    
-                    vec2 toCenter = uv_center - currentCenter;
-                    float r = length(toCenter);
-                    float angle = atan(toCenter.y, toCenter.x);
-                    
-                    // 經典葉片外形數學算式 (含對稱葉脈起伏與左右不對稱微風感)
-                    float leafShape = abs(sin(angle)) * cos(angle * 0.5);
-                    float base_d = (r / leafScale) / (0.15 + 0.65 * leafShape);
-                    
-                    float pulse1 = sin(base_d * 0.8 - progress * 1.8);
-                    float pulse2 = sin(base_d * 2.5 - angle * 4.0 - progress * 3.2);
-                    
-                    float leaf_line1 = 0.12 / (abs(pulse1) + 0.12);
-                    float leaf_line2 = 0.06 / (abs(pulse2) + 0.06);
-                    
-                    float layer_glow = leaf_line1 * 1.1 + leaf_line2 * 0.6;
-                    
-                    float fadeIn = smoothstep(0.0, 2.0, stageTime);
-                    float fadeOut = 1.0 - smoothstep(11.0, 16.0, stageTime);
-                    float spaceFade = exp(-base_d * 0.18); 
-                    
-                    layer_glow *= fadeIn * fadeOut * spaceFade;
-                    
-                    vec3 thisCornerColor = palette(iTime * 0.06 + float(i) * 0.4, colorBias);
-                    rippleLayerColorSum += thisCornerColor * layer_glow;
-                    total_mix_weight += layer_glow;
+                    // --- 橢圓邏輯 ---
+                    float current_sin = (rippleTime < 25.0) ? ext_sin : -ext_sin;
+                    float ellipse_glow = 0.0;
+                    vec2 centers[2]; centers[0] = center1; centers[1] = center2;
+                    for(int j = 0; j < 2; j++) {
+                        vec2 toC = uv_center - centers[j];
+                        vec2 rot = vec2(toC.x * ext_cos + toC.y * current_sin, -toC.x * current_sin + toC.y * ext_cos);
+                        float d = sqrt(rot.x * rot.x * ellipRatioX + rot.y * rot.y * ellipRatioY) * ellipScale;
+                        
+                        float g1 = pow(ellipThick1 / (abs(sin(d * 0.8 - stageTime * 0.8)) + ellipThick1), 2.0);
+                        float g2 = pow(ellipThick2 / (abs(sin(d * 2.5 - stageTime * 2.0)) + ellipThick2), 2.0);
+                        ellipse_glow += (g1 + g2) * exp(-d * 0.5) * 0.35 * sharpen;
+                    }
+
+                    // --- 合成 ---
+                    float global_env = smoothstep(1.8, 0.0, abs(uv_center.x * ext_sin - uv_center.y * ext_cos) * 0.4);
+                    float time_env = smoothstep(0.0, 1.0, stageTime) * (1.0 - smoothstep(10.0, 14.0, stageTime));
+                    vec3 bias = vec3(float(i)*0.05);
+                    vec3 leafColor = palette(iTime * 0.08 + float(i) * 0.25, bias);
+                    vec3 ellipColor = palette(iTime * 0.08 + float(i) * 0.25 + colorDelay, bias);
+                    rippleLayerColorSum += (leafColor * leaf_glow + ellipColor * ellipse_glow) * time_env * global_env;
+                    total_mix_weight += (leaf_glow + ellipse_glow) * time_env * global_env;
                 }
 
-                float rippleMixControl = 1.0 - exp(-total_mix_weight * 1.4);
-                vec3 finalRippleColor = rippleLayerColorSum / (total_mix_weight + 0.001);
-                vec3 finalColor = mix(backgroundColor, finalRippleColor, rippleMixControl);
+                vec3 finalColor = mix(backgroundColor, rippleLayerColorSum / (total_mix_weight + 0.001), 1.0 - exp(-total_mix_weight * 1.2));
                 fragColor = vec4(finalColor, 1.0);
             }
             void main() { mainImage(gl_FragColor, gl_FragCoord.xy); }
         `;
 
-        // 🗂️ 註冊 Shader 骨架地圖字典 (已完美加入 leaf)
+        // 🗂️ 註冊 Shader 骨架地圖字典 (已加入 Leaf)
         const shaderRepository = {
             'sakura': fragmentShaderSakura,
             'wave': fragmentShaderWave,
             'leaf': fragmentShaderLeaf
         };
 
-        // --- 互動狀態機控制流程 ---
+        // ========================================================
+        // 互動狀態機控制流程 (此部分與你基準版完全一致)
+        // ========================================================
         let currentStep = 1;
         const htmlContent = document.getElementById('content-area');
         const cardNode = document.getElementById('dialog-card');
@@ -479,6 +496,7 @@
 
         // ========================================================
         // 🔊 WEB AUDIO API 數位音訊合成核心引擎
+        // (此部分依循你基準版，等待填入正確內容)
         // ========================================================
         function setupBrainwaveAudio(moodIndex) {
             let chord = [349.23, 440.00, 523.25]; // F Major
