@@ -2,13 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Zen Space - Interactive Shader</title>
+    <title>Zen Space - Full Integration</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
         body, html { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; font-family: sans-serif; }
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
-        #ui-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
+        #ui-container { position: absolute; z-index: 10; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); }
         .cloud-box { transition: opacity 0.6s ease, transform 0.6s ease; }
     </style>
 </head>
@@ -23,57 +23,88 @@
     </div>
 
     <script>
+        // --- 1. 全域變數與參數 ---
         let scene, camera, renderer, material;
         let shaderUniforms = {
             iTime: { value: 0 },
             iResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
             uStarted: { value: 0.0 },
-            uDeltaFreq: { value: 6.0 }, // 腦波參數 1
-            uBetaFreq: { value: 10.0 }  // 腦波參數 2
+            uDeltaFreq: { value: 6.0 },
+            uBetaFreq: { value: 10.0 }
         };
 
-        // --- Shader 資源倉庫 ---
-        const shaderRepository = {
-            'sakura': `...sakura_code...`, // (請參照下方完整字串)
-            'wave': `...wave_code...`,
-            'leaf': `...leaf_code...`
-        };
+        // --- 2. Shader 資源庫 (請將完整內容貼入這些變數中) ---
+        const fragSakura = `...完整櫻花程式碼...`;
+        const fragWave = `...完整海浪程式碼...`;
+        const fragLeaf = `...完整葉子程式碼...`;
 
-        // 這裡提供三個完整的 Shader 字串定義
-        // 為了節省空間，請將上面你提供的三個 mainImage 邏輯放入對應變數中
-        const fragmentShaderSakura = `...`; 
-        const fragmentShaderWave = `...`;
-        const fragmentShaderLeaf = `...`;
+        const shaderRepository = { 'sakura': fragSakura, 'wave': fragWave, 'leaf': fragLeaf };
 
-        // --- 互動邏輯 ---
-        function selectMood(d, b, moodIndex) { 
-            shaderUniforms.uDeltaFreq.value = d;
+        // --- 3. UI 互動流程 (您的核心架構) ---
+        let currentStep = 1;
+        const htmlContent = document.getElementById('content-area');
+        const cardNode = document.getElementById('dialog-card');
+
+        function updateFlow() {
+            cardNode.style.opacity = '0';
+            setTimeout(() => {
+                switch(currentStep) {
+                    case 1:
+                        htmlContent.innerHTML = `<h2 class="text-2xl">Hello there...</h2>`;
+                        cardNode.style.opacity = '1';
+                        setTimeout(() => { currentStep = 2; updateFlow(); }, 2000);
+                        break;
+                    case 4: // 腦波選項觸發
+                        htmlContent.innerHTML = `
+                            <h3 class="mb-5 text-gray-400">How are you feeling?</h3>
+                            <button onclick="selectMood(6.0, 10.0, 1)" class="w-full bg-white/10 p-3 mb-2 rounded-xl">Calm</button>
+                            <button onclick="selectMood(10.0, 15.0, 2)" class="w-full bg-white/10 p-3 mb-2 rounded-xl">Stressed</button>`;
+                        cardNode.style.opacity = '1';
+                        break;
+                    case 7: // 模式選擇
+                        htmlContent.innerHTML = `
+                            <h3 class="mb-5 text-gray-400">Pick your view:</h3>
+                            <div class="grid grid-cols-3 gap-4">
+                                <button onclick="selectPattern('sakura')" class="text-3xl bg-white/10 p-4 rounded-xl">🌸</button>
+                                <button onclick="selectPattern('wave')" class="text-3xl bg-white/10 p-4 rounded-xl">🌊</button>
+                                <button onclick="selectPattern('leaf')" class="text-3xl bg-white/10 p-4 rounded-xl">🌿</button>
+                            </div>`;
+                        cardNode.style.opacity = '1';
+                        break;
+                    case 9:
+                        htmlContent.innerHTML = `<h2 class="text-2xl text-green-400">Enjoy your space.</h2>`;
+                        cardNode.style.opacity = '1';
+                        setTimeout(() => { 
+                            document.getElementById('ui-container').style.display = 'none';
+                            shaderUniforms.uStarted.value = 1.0;
+                        }, 2000);
+                        break;
+                }
+            }, 400);
+        }
+
+        function selectMood(d, b) { 
+            shaderUniforms.uDeltaFreq.value = d; 
             shaderUniforms.uBetaFreq.value = b;
             currentStep = 5; updateFlow(); 
         }
 
-        function selectPattern(pat, patternKey) {
-            material.fragmentShader = shaderRepository[patternKey];
+        function selectPattern(key) {
+            material.fragmentShader = shaderRepository[key];
             material.needsUpdate = true;
             currentStep = 8; updateFlow();
         }
 
-        // --- 初始化 ---
+        // --- 4. 初始化 ---
         function init() {
-            const canvas = document.getElementById('webgl-canvas');
-            renderer = new THREE.WebGLRenderer({ canvas });
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas') });
             renderer.setSize(window.innerWidth, window.innerHeight);
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-            
-            // 預設櫻花
-            material = new THREE.ShaderMaterial({
-                uniforms: shaderUniforms,
-                fragmentShader: shaderRepository.sakura
-            });
+            material = new THREE.ShaderMaterial({ uniforms: shaderUniforms, fragmentShader: shaderRepository.sakura });
             scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
-            
             animate();
+            updateFlow();
         }
 
         function animate(t) {
